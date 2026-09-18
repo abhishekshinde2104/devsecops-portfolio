@@ -314,8 +314,7 @@ def main(argv: list[str] | None = None) -> int:
     policy = load_policy(args.policy)
     result = evaluate(policy, args.reports, allow_missing=args.allow_missing)
     if args.allow_missing:
-        print(f"WARNING: reports allowed to be missing (local run): {', '.join(args.allow_missing)}
-")
+        print(f"WARNING: reports allowed to be missing (local run): {', '.join(args.allow_missing)}\n")
     markdown = render_markdown(result, policy)
     print(markdown)
     if args.summary:
