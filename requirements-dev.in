@@ -1,0 +1,7 @@
+# Test/lint tooling, constrained to the runtime lock so versions never diverge.
+#   pip-compile --generate-hashes --strip-extras --allow-unsafe requirements-dev.in
+-c requirements.txt
+pytest>=8
+pytest-cov>=5
+httpx>=0.27
+ruff>=0.6

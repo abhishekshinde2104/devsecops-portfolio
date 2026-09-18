@@ -1,0 +1,1 @@
+{"results": [{"check_id": "python.lang.best-practice.example", "path": "app/x.py", "start": {"line": 3}, "extra": {"severity": "INFO", "message": "informational only"}}], "errors": []}

@@ -1,0 +1,15 @@
+# Keep dependencies, the base image and pinned action SHAs current. Each
+# update PR runs through the full pipeline and the security gate.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      runtime: { patterns: ["*"] }
+  - package-ecosystem: docker
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }

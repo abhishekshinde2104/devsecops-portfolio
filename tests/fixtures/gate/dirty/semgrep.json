@@ -1,0 +1,1 @@
+{"results": [{"check_id": "fastapi-security.jwt-decode-without-algorithms", "path": "app/security.py", "start": {"line": 42}, "extra": {"severity": "ERROR", "message": "jwt.decode without algorithms"}}]}

@@ -1,0 +1,1 @@
+{"Results": [{"Target": "Dockerfile", "Misconfigurations": [{"ID": "DS002", "AVDID": "AVD-DS-0002", "Title": "Image user should not be 'root'", "Status": "FAIL", "Severity": "HIGH", "CauseMetadata": {"StartLine": 1}}]}]}

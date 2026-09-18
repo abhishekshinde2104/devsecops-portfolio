@@ -1,0 +1,17 @@
+# Shift-left: the same checks as CI, before code leaves the laptop.
+#   pip install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.8
+    hooks:
+      - id: ruff
+      - id: ruff-format
+  - repo: https://github.com/semgrep/pre-commit
+    rev: v1.177.0
+    hooks:
+      - id: semgrep
+        args: ["--config", "semgrep-rules/fastapi-security.yml", "--error", "--metrics=off"]

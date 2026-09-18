@@ -1,0 +1,18 @@
+# secrets
+.env
+.env.*
+!.env.example
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+# local data
+*.db
+# scanner output (committed snapshots live in docs/scan-results/)
+reports/

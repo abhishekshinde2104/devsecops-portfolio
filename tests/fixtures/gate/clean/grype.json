@@ -1,0 +1,1 @@
+{"matches": [{"vulnerability": {"id": "CVE-2025-1111", "severity": "High", "fix": {"state": "not-fixed", "versions": []}}, "artifact": {"name": "libfoo", "version": "1.0"}}]}

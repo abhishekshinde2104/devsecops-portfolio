@@ -1,0 +1,58 @@
+# Security gate policy, enforced by scripts/security_gate.py in CI and locally.
+#
+# Changing this file changes what can ship, so it should be CODEOWNERS-protected
+# and reviewed by security (see docs/pipeline.md#governance).
+
+[gate]
+# Severities that fail the build.
+fail_on = ["CRITICAL", "HIGH"]
+# Dependency/image CVEs without an upstream fix are reported but do not block;
+# they are tracked in the vulnerability-management workflow (Project 4)
+# instead. SAST, secrets and misconfigurations are always blocking.
+ignore_unfixed = true
+
+# Every required report must exist and parse, otherwise the gate fails closed.
+[[reports]]
+name = "semgrep (SAST)"
+parser = "semgrep"
+path = "semgrep.json"
+
+[[reports]]
+name = "gitleaks (secrets)"
+parser = "gitleaks"
+path = "gitleaks.json"
+
+[[reports]]
+name = "trivy image (container CVEs + secrets)"
+parser = "trivy"
+path = "trivy-image.json"
+
+[[reports]]
+name = "trivy config (Dockerfile / IaC misconfiguration)"
+parser = "trivy"
+path = "trivy-config.json"
+
+[[reports]]
+name = "trivy fs (lockfile SCA)"
+parser = "trivy"
+path = "trivy-fs.json"
+
+[[reports]]
+name = "grype (SBOM-based SCA)"
+parser = "grype"
+path = "grype.json"
+
+[[reports]]
+name = "OWASP Dependency-Check (SCA)"
+parser = "dependency-check"
+path = "dependency-check/dependency-check-report.json"
+
+# Time-boxed risk acceptances. An exception must name an approver and an
+# expiry date; once it expires the finding blocks again automatically.
+#
+# [[exceptions]]
+# id = "CVE-2099-00000"
+# location = "somepkg@1.2.3"        # optional: restrict to one package/file
+# reason = "Not reachable: vulnerable function unused; upgrade blocked by X"
+# approved_by = "security@example.com"
+# expires = 2026-12-31

@@ -1,0 +1,34 @@
+[project]
+name = "secure-invoice-api"
+version = "1.0.0"
+description = "Security-hardened FastAPI reference service with a DevSecOps pipeline"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+filterwarnings = ["error::DeprecationWarning:app.*"]
+
+[tool.coverage.run]
+source = ["app", "scripts"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 85
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["semgrep-rules"]
+
+[tool.ruff.lint]
+# S = flake8-bandit: a fast, in-editor SAST layer before Semgrep runs in CI.
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF"]
+ignore = ["B008"]  # FastAPI's Depends() in defaults is idiomatic
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S104", "S105", "S106", "S311"]
+"scripts/**" = ["S603", "S607"]

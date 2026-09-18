@@ -1,0 +1,1 @@
+{"dependencies": [{"fileName": "requirements.txt", "packages": [{"id": "pkg:pypi/starlette@0.36.3"}], "vulnerabilities": [{"name": "CVE-2025-3333", "severity": "", "cvssv3": {"baseSeverity": "HIGH"}}]}]}

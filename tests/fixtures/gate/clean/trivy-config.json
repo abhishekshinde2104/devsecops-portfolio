@@ -1,0 +1,1 @@
+{"Results": [{"Target": "Dockerfile", "Misconfigurations": [{"ID": "DS026", "AVDID": "AVD-DS-0026", "Status": "PASS", "Severity": "LOW"}]}]}

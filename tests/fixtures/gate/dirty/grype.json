@@ -1,0 +1,1 @@
+{"matches": [{"vulnerability": {"id": "CVE-2025-3333", "severity": "High", "fix": {"state": "fixed", "versions": ["0.40.0"]}}, "artifact": {"name": "starlette", "version": "0.36.3"}}]}

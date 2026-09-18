@@ -1,0 +1,262 @@
+# DevSecOps pipeline: test -> (secrets | SAST | SCA | image scan + SBOM) -> severity gate
+#
+# Design notes (see docs/pipeline.md for the full write-up):
+# * Scanner jobs *produce reports*; they do not decide. The final
+#   `security-gate` job applies security-gate.toml to all reports at once, so
+#   every scanner always runs and the PR summary shows the complete picture.
+# * The gate fails closed: a missing report (crashed/skipped scanner) fails it.
+# * Third-party actions are pinned to full commit SHAs (tag in the comment);
+#   Dependabot keeps them current. Scanner images are pinned to versions.
+# * Least privilege: the workflow token is read-only; only jobs that upload
+#   SARIF get security-events: write.
+
+name: devsecops
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly re-scan of main: new CVEs are published against unchanged code.
+    - cron: "23 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: secure-invoice-api:${{ github.sha }}
+  PYTHON_VERSION: "3.13"
+  TRIVY_IMAGE: aquasec/trivy:0.74.0
+  SEMGREP_IMAGE: semgrep/semgrep:1.177.0
+  SYFT_IMAGE: anchore/syft:v1.52.0
+  GRYPE_IMAGE: anchore/grype:v0.119.0
+  DEPCHECK_IMAGE: owasp/dependency-check:13.0.0
+  GITLEAKS_VERSION: "8.30.1"
+
+jobs:
+  # ------------------------------------------------------------------ tests
+  test:
+    name: Lint + security regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install (hash-verified)
+        run: pip install --require-hashes -r requirements.txt -r requirements-dev.txt
+      - name: Ruff (lint incl. flake8-bandit rules + format)
+        run: |
+          ruff check --output-format=github .
+          ruff format --check .
+      - name: Pytest (coverage gate 85%)
+        run: pytest --cov --cov-report=term --cov-report=xml --junitxml=reports/junit.xml
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: test-results
+          path: |
+            reports/junit.xml
+            coverage.xml
+
+  # ------------------------------------------------------------------ secrets
+  secrets:
+    name: Secrets scan (Gitleaks, full history)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # scan every commit, not just the tip
+          persist-credentials: false
+      - name: Install gitleaks (checksum-verified)
+        run: |
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfLO "$base/$tarball"
+          curl -sSfLO "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          sha256sum --check --ignore-missing "gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          tar -xzf "$tarball" gitleaks
+      - name: Scan git history
+        run: |
+          mkdir -p reports
+          ./gitleaks git . --config .gitleaks.toml --redact \
+            --report-format json --report-path reports/gitleaks.json --exit-code 0
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reports-gitleaks
+          path: reports/
+
+  # ------------------------------------------------------------------ SAST
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Unit-test the custom rules
+        run: docker run --rm -v "$PWD:/src" -w /src "$SEMGREP_IMAGE" semgrep --test --metrics=off semgrep-rules/
+      - name: Scan (community rulesets + custom rules)
+        run: |
+          mkdir -p reports
+          docker run --rm -v "$PWD:/src" -w /src "$SEMGREP_IMAGE" semgrep scan \
+            --config p/python --config p/owasp-top-ten --config p/jwt \
+            --config semgrep-rules/fastapi-security.yml \
+            --metrics=off --json-output=reports/semgrep.json --sarif-output=reports/semgrep.sarif
+      - name: Upload SARIF to GitHub code scanning
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        continue-on-error: true # needs GitHub Advanced Security on private repos
+        with:
+          sarif_file: reports/semgrep.sarif
+          category: semgrep
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reports-semgrep
+          path: reports/
+
+  # ------------------------------------------------------------------ SCA
+  dependency-check:
+    name: SCA (OWASP Dependency-Check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Restore NVD database cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.dependency-check-data
+          key: depcheck-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: depcheck-${{ runner.os }}-
+      - name: Scan dependencies
+        env:
+          # Free key: https://nvd.nist.gov/developers/request-an-api-key
+          # Without it the first NVD download is heavily rate-limited.
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          mkdir -p reports/dependency-check ~/.dependency-check-data
+          key_arg=()
+          if [ -n "$NVD_API_KEY" ]; then key_arg=(--nvdApiKey "$NVD_API_KEY"); fi
+          docker run --rm --user 0:0 \
+            -v "$PWD:/src" -v "$HOME/.dependency-check-data:/usr/share/dependency-check/data" \
+            "$DEPCHECK_IMAGE" \
+            --project secure-invoice-api \
+            --scan /src/requirements.txt --scan /src/requirements-dev.txt \
+            --enableExperimental --disableOssIndex \
+            --format JSON --format SARIF --format HTML \
+            --out /src/reports/dependency-check \
+            "${key_arg[@]}"
+          sudo chown -R "$(id -u):$(id -g)" reports ~/.dependency-check-data
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: reports-dependency-check
+          path: reports/
+
+  # ------------------------------------------------------------------ image
+  image:
+    name: Build image, SBOM, container + IaC + lockfile scans
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build runtime image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: runtime
+          tags: ${{ env.IMAGE }}
+          outputs: type=docker,dest=${{ runner.temp }}/image.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Cache Trivy DB
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/trivy
+          key: trivy-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: trivy-${{ runner.os }}-
+      - name: Trivy - image (OS + Python packages + embedded secrets)
+        run: |
+          mkdir -p reports ~/.cache/trivy
+          trivy() { docker run --rm -v "$PWD:/src" -v "${{ runner.temp }}:/in:ro" -v "$HOME/.cache/trivy:/root/.cache/trivy" -w /src "$TRIVY_IMAGE" "$@"; }
+          trivy image --input /in/image.tar --scanners vuln,secret --format json --output reports/trivy-image.json
+          trivy image --input /in/image.tar --scanners vuln --skip-db-update \
+            --severity HIGH,CRITICAL --ignore-unfixed --format sarif --output reports/trivy-image.sarif
+          # Misconfiguration scan of Dockerfile/compose (and k8s manifests in Project 2)
+          trivy config --format json --output reports/trivy-config.json .
+          # Lockfile SCA on the source tree (catches dev dependencies too)
+          trivy fs --scanners vuln --skip-db-update --format json --output reports/trivy-fs.json .
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        continue-on-error: true
+        with:
+          sarif_file: reports/trivy-image.sarif
+          category: trivy-image
+      - name: Syft - generate SBOM (CycloneDX + SPDX)
+        run: |
+          docker run --rm -v "$PWD/reports:/out" -v "${{ runner.temp }}:/in:ro" "$SYFT_IMAGE" \
+            docker-archive:/in/image.tar \
+            -o cyclonedx-json=/out/sbom.cdx.json -o spdx-json=/out/sbom.spdx.json
+      - name: Grype - scan the SBOM
+        run: |
+          docker run --rm -v "$PWD/reports:/work" "$GRYPE_IMAGE" sbom:/work/sbom.cdx.json -o json > reports/grype.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reports-image
+          path: reports/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom
+          path: |
+            reports/sbom.cdx.json
+            reports/sbom.spdx.json
+
+  # ------------------------------------------------------------------ gate
+  security-gate:
+    name: Security gate
+    runs-on: ubuntu-latest
+    needs: [test, secrets, sast, dependency-check, image]
+    if: always()
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: reports-*
+          merge-multiple: true
+          path: reports
+      - name: Evaluate policy (security-gate.toml)
+        run: |
+          python scripts/security_gate.py --policy security-gate.toml --reports reports \
+            --summary "$GITHUB_STEP_SUMMARY" --output reports/gate-result.json
+      - name: Tests must also have passed
+        if: needs.test.result != 'success'
+        run: |
+          echo "::error::Lint/test job result: ${{ needs.test.result }}"
+          exit 1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: gate-result
+          path: reports/gate-result.json

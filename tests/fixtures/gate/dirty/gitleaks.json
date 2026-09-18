@@ -1,0 +1,1 @@
+[{"RuleID": "generic-api-key", "Description": "Generic API Key", "File": "app/config.py", "StartLine": 7, "Commit": "0123456789abcdef", "Secret": "REDACTED"}]

@@ -1,0 +1,127 @@
+# Project-specific Semgrep rules. They encode the security decisions of this
+# codebase so a regression fails CI even if generic rulesets miss it.
+# Unit-tested with:  semgrep --test semgrep-rules/
+rules:
+  - id: jwt-decode-without-algorithms
+    languages: [python]
+    severity: ERROR
+    message: >-
+      jwt.decode() without an explicit `algorithms=[...]` allowlist can accept
+      tokens signed with an unexpected algorithm (alg confusion / alg=none).
+    metadata:
+      cwe: "CWE-347: Improper Verification of Cryptographic Signature"
+      owasp: ["A02:2021", "A07:2021", "API2:2023"]
+      control: docs/controls/API2-broken-authentication.md
+    patterns:
+      - pattern: jwt.decode(...)
+      - pattern-not: jwt.decode(..., algorithms=[...], ...)
+
+  - id: jwt-signature-verification-disabled
+    languages: [python]
+    severity: ERROR
+    message: JWT signature or claim verification is disabled.
+    metadata:
+      cwe: "CWE-347: Improper Verification of Cryptographic Signature"
+      owasp: ["A07:2021", "API2:2023"]
+    pattern-either:
+      - pattern: 'jwt.decode(..., options={..., "verify_signature": False, ...}, ...)'
+      - pattern: 'jwt.decode(..., options={..., "verify_exp": False, ...}, ...)'
+      - pattern: 'jwt.decode(..., options={..., "verify_aud": False, ...}, ...)'
+
+  - id: raw-sql-string-building
+    languages: [python]
+    severity: ERROR
+    message: >-
+      SQL built with string formatting. Use ORM expressions or bound
+      parameters (text("... :name").bindparams(name=value)).
+    metadata:
+      cwe: "CWE-89: SQL Injection"
+      owasp: ["A03:2021"]
+      control: docs/controls/A03-sql-injection.md
+    pattern-either:
+      - pattern: sqlalchemy.text(f"...")
+      - pattern: sqlalchemy.text("..." + $X)
+      - pattern: sqlalchemy.text("...".format(...))
+      - pattern: sqlalchemy.text("..." % $X)
+      - pattern: $DB.execute(f"...", ...)
+      - pattern: $DB.execute("..." + $X, ...)
+      - pattern: $DB.execute("...".format(...), ...)
+      - pattern: $DB.execute("..." % $X, ...)
+
+  - id: outbound-http-outside-ssrf-guard
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Outbound HTTP must go through app/ssrf.py (scheme/host/IP validation,
+      IP pinning, no redirects). Direct client calls bypass SSRF controls.
+    metadata:
+      cwe: "CWE-918: Server-Side Request Forgery"
+      owasp: ["A10:2021", "API7:2023"]
+      control: docs/controls/A10-ssrf.md
+    paths:
+      exclude: ["app/ssrf.py"]
+    pattern-either:
+      - pattern: requests.$METHOD(...)
+      - pattern: httpx.$METHOD(...)
+      - pattern: httpx.Client(...)
+      - pattern: httpx.AsyncClient(...)
+      - pattern: urllib.request.urlopen(...)
+      - pattern: urllib3.PoolManager(...)
+      - pattern: urllib3.request(...)
+      - pattern: aiohttp.ClientSession(...)
+
+  - id: pydantic-model-allows-extra-fields
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Input models must forbid unknown fields; extra="allow" lets clients set
+      attributes that were never meant to be writable (mass assignment).
+    metadata:
+      cwe: "CWE-915: Improperly Controlled Modification of Dynamically-Determined Object Attributes"
+      owasp: ["API3:2023"]
+      control: docs/controls/API3-mass-assignment.md
+    pattern-either:
+      - pattern: ConfigDict(..., extra="allow", ...)
+      - pattern: pydantic.ConfigDict(..., extra="allow", ...)
+
+  - id: orm-object-from-raw-request-body
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Building a model from the raw request body copies every client-supplied
+      key. Validate with an allowlisted schema first.
+    metadata:
+      cwe: "CWE-915"
+      owasp: ["API3:2023"]
+    pattern-either:
+      - pattern: $MODEL(**(await $REQ.json()))
+      - pattern: $MODEL(**$REQ.json())
+      - pattern: $OBJ.__dict__.update(...)
+
+  - id: hardcoded-signing-secret
+    languages: [python]
+    severity: ERROR
+    message: Signing keys must come from the environment/secret store, never source code.
+    metadata:
+      cwe: "CWE-798: Use of Hard-coded Credentials"
+      owasp: ["A07:2021", "A02:2021"]
+      control: docs/controls/A07-hardcoded-secrets.md
+    pattern-either:
+      - pattern: jwt.encode($PAYLOAD, "...", ...)
+      - patterns:
+          - pattern-either:
+              - pattern: $NAME = "..."
+              - pattern: '$NAME: $T = "..."'
+          # only assignments to secret-looking names
+          - metavariable-regex:
+              metavariable: $NAME
+              regex: (?i)^.*(secret|signing)_?key$
+
+  - id: cors-wildcard-with-credentials
+    languages: [python]
+    severity: ERROR
+    message: Wildcard CORS origin together with credentials lets any site make authenticated requests.
+    metadata:
+      cwe: "CWE-942: Permissive Cross-domain Policy"
+      owasp: ["A05:2021", "API8:2023"]
+    pattern: $APP.add_middleware(CORSMiddleware, ..., allow_origins=["*"], ..., allow_credentials=True, ...)

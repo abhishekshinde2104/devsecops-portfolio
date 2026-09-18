@@ -1,0 +1,19 @@
+# Keep the build context minimal: no VCS data, secrets, reports or caches.
+.git
+.github
+.gitlab-ci.yml
+.env
+.env.*
+!.env.example
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.coverage
+coverage.xml
+htmlcov
+reports
+docs
+*.db
+.venv
+venv
