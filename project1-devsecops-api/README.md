@@ -143,6 +143,24 @@ NVD_API_KEY=... bash scripts/scan-local.sh --with-depcheck
 
 Reports land in `reports/`, and the gate's verdict is printed at the end.
 
+### Windows (PowerShell)
+
+```powershell
+# One-time: store the NVD key for your user (input is hidden), then open a NEW terminal
+$s = Read-Host "NVD API key" -AsSecureString
+[Environment]::SetEnvironmentVariable("NVD_API_KEY", [System.Net.NetworkCredential]::new("", $s).Password, "User")
+
+# Run the API
+cd project1-devsecops-api
+Copy-Item .env.example .env
+$key = python -c "import secrets; print(secrets.token_urlsafe(48))"
+(Get-Content .env) -replace '^APP_SECRET_KEY=$', "APP_SECRET_KEY=$key" | Set-Content .env -Encoding ascii
+docker compose up --build            # http://127.0.0.1:8000/docs
+
+# Run the security pipeline (use Git Bash's bash, not WSL's)
+& "C:\Program Files\Git\bin\bash.exe" scripts/scan-local.sh --with-depcheck
+```
+
 ### Enable it on GitHub
 
 1. Push to a new GitHub repository.
