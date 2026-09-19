@@ -11,7 +11,7 @@ one instead of starting from a toy example.
 
 | # | Project | What it demonstrates | Status |
 |---|---------|----------------------|--------|
-| 1 | [Secure API + DevSecOps pipeline](project1-devsecops-api/) | OWASP Top 10 / API Top 10 controls with regression tests, SAST (Semgrep + custom rules), SCA (Dependency-Check, Trivy, Grype), SBOM (Syft), secret scanning (Gitleaks), container/IaC scanning, fail-closed severity gate, red → green demo | ✅ |
+| 1 | [Secure API + DevSecOps pipeline](project1-devsecops-api/) | OWASP Top 10 / API Top 10 controls with regression tests, SAST (Semgrep + custom rules), SCA (Dependency-Check, Trivy, Grype), SBOM (Syft), secret scanning (Gitleaks), container/IaC scanning, fail-closed severity gate, red → green demo | ✅ ([scan results](project1-devsecops-api/docs/scan-results.md)) |
 | 2 | Kubernetes hardening lab | kind cluster, insecure → hardened deployment, Pod Security, NetworkPolicies, RBAC, Secrets, kube-bench (CIS) and Kubescape before/after scores | 🚧 |
 | 3 | Security monitoring stack | Prometheus + Grafana via Helm, app security metrics, alerts for brute force / BOLA probing / SSRF attempts / restarts, Falco runtime detection | 🚧 |
 | 4 | Threat model + vulnerability management | STRIDE per trust boundary with a data-flow diagram, DefectDojo triage of all scanner output, vulnerability management policy with SLAs | 🚧 |

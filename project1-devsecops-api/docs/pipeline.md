@@ -22,7 +22,7 @@ flowchart LR
 
 | Job | Tool (pinned) | Scans | Report(s) | Why this tool |
 |---|---|---|---|---|
-| `test` | ruff 0.16, pytest 9 | lint incl. flake8-bandit `S` rules; 100+ security regression tests; coverage ≥85% | JUnit, coverage XML | Fastest feedback; regression tests prove the controls, scanners only find patterns |
+| `test` | ruff 0.16, pytest 9 | lint incl. flake8-bandit `S` rules; 111 security regression tests; coverage ≥85% | JUnit, coverage XML | Fastest feedback; regression tests prove the controls, scanners only find patterns |
 | `secrets` | Gitleaks 8.30.1 (binary, SHA-256 verified) | every commit in history | `gitleaks.json` | A secret deleted in a later commit is still leaked; only history scans find it |
 | `sast` | Semgrep 1.177.0 | Python source | `semgrep.json`, SARIF → Code Scanning | Community rules + project rules that encode *this* codebase's decisions ([semgrep-rules/](../semgrep-rules/)); rules are unit-tested (`semgrep --test`) |
 | `dependency-check` | OWASP Dependency-Check 13.0.0 | `requirements*.txt` (NVD CPE matching) | JSON, SARIF, HTML | The SCA tool most job descriptions name; NVD-based, so it complements GHSA/OSV-based Trivy and Grype |

@@ -18,7 +18,7 @@ build.
 | Area | What it demonstrates | Where |
 |---|---|---|
 | Secure API | BOLA/IDOR protection, JWT hardening, Argon2id, mass-assignment protection, parameterised queries, SSRF guard with IP pinning, rate limiting, secret handling, security headers | [`app/`](app/) |
-| Security regression tests | 100+ tests that exercise attack patterns against each control | [`tests/`](tests/) |
+| Security regression tests | 111 tests that exercise attack patterns against each control, plus gate and image-policy tests | [`tests/`](tests/) |
 | Custom SAST rules | 8 Semgrep rules encoding this codebase's security decisions, unit-tested | [`semgrep-rules/`](semgrep-rules/) |
 | CI pipeline | Gitleaks, Semgrep, OWASP Dependency-Check, Trivy (image/config/fs), Syft SBOM, Grype | [`.github/workflows/project1-devsecops.yml`](../.github/workflows/project1-devsecops.yml) |
 | Severity gate | Normalises every scanner, blocks on HIGH/CRITICAL, fails closed, time-boxed exceptions | [`scripts/security_gate.py`](scripts/security_gate.py), [`security-gate.toml`](security-gate.toml) |
@@ -154,20 +154,29 @@ Reports land in `reports/`, and the gate's verdict is printed at the end.
 
 ## Demonstrating red → green
 
-The branch `demo/red-pipeline` contains one realistic commit that a developer
-might make: it adds a YAML config dependency pinned to an old version with
-known CVEs, and "temporarily" drops the non-root `USER` from the Dockerfile to
-debug a permissions issue. The gate blocks it on:
+The branch `demo/red-pipeline` holds two commits.
 
-- **SCA**: Trivy, Grype and Dependency-Check each flag the vulnerable PyYAML
-  pin, which is fixable, so the gate blocks it (reported once after
-  deduplication);
-- **IaC**: Trivy config flags the root container (`AVD-DS-0002`, HIGH).
+**Commit 1 (red)** is the kind of change that gets merged on a busy day: pin
+PyJWT to 2.3.0 "to match the billing service", and drop the non-root `USER` "to
+debug volume permissions". All 111 tests still pass. The gate blocks it:
 
-The follow-up commit on the same branch upgrades the dependency and restores
-`USER 10001`, and the gate goes green. Open a PR from that branch to see both
-states in the Actions tab. See [docs/scan-results.md](docs/scan-results.md) for
-the local numbers.
+| Finding | Found by | Why it blocks |
+|---|---|---|
+| CVE-2022-29217, CVE-2026-32597, CVE-2026-48526 in `pyjwt@2.3.0` | Trivy image, Trivy fs and Grype (9 raw findings, deduplicated to 3) | HIGH, fix available |
+| `IMG-001`: image runs as root | image policy check | HIGH. Trivy DS002 and Semgrep `missing-user` both **miss** it because an earlier Dockerfile stage has a `USER` line |
+
+**Commit 2 (green)** upgrades PyJWT and restores `USER 10001:10001`; the gate
+passes.
+
+Talking points:
+- **Reachability vs policy.** This code pins `algorithms=["HS256"]`, so
+  CVE-2022-29217 (algorithm confusion) isn't reachable here. The gate still
+  blocks, because a fixed version exists and reachability arguments belong in
+  a reviewed, time-boxed exception, not a silent pass.
+- **Tests don't catch this.** Functional and security tests stay green; only
+  supply-chain and configuration scanning notices.
+
+Full run history and numbers: [docs/scan-results.md](docs/scan-results.md).
 
 ## Repository layout
 
