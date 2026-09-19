@@ -25,6 +25,7 @@ path = "gitleaks.json"
 [[reports]]
 name = "trivy image (container CVEs + secrets)"
 parser = "trivy"
+label = "trivy-image"
 path = "trivy-image.json"
 
 [[reports]]
@@ -35,7 +36,13 @@ path = "trivy-config.json"
 [[reports]]
 name = "trivy fs (lockfile SCA)"
 parser = "trivy"
+label = "trivy-fs"
 path = "trivy-fs.json"
+
+[[reports]]
+name = "image policy (runtime config of the built image)"
+parser = "image-policy"
+path = "image-policy.json"
 
 [[reports]]
 name = "grype (SBOM-based SCA)"

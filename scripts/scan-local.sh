@@ -54,6 +54,8 @@ docker run --rm -v "$ROOT/reports:/out" "$SYFT_IMAGE" docker-archive:/out/image.
   -o cyclonedx-json=/out/sbom.cdx.json -o spdx-json=/out/sbom.spdx.json -q
 docker run --rm -v "$ROOT/reports:/work" -v "$CACHE/grype:/root/.cache/grype" -e GRYPE_DB_CACHE_DIR=/root/.cache/grype \
   "$GRYPE_IMAGE" sbom:/work/sbom.cdx.json -o json -q > reports/grype.json
+step "Image policy"
+python scripts/image_policy.py --image-tar reports/image.tar --output reports/image-policy.json
 rm -f reports/image.tar
 
 ALLOW_MISSING=()

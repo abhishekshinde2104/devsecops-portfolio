@@ -203,6 +203,10 @@ jobs:
           trivy config --format json --output reports/trivy-config.json .
           # Lockfile SCA on the source tree (catches dev dependencies too)
           trivy fs --scanners vuln --skip-db-update --format json --output reports/trivy-fs.json .
+      - name: Image policy (runtime user, baked-in secrets, healthcheck)
+        # Dockerfile linters only see the last USER instruction in the file;
+        # this checks the config of the image that will actually run.
+        run: python3 scripts/image_policy.py --image-tar "$RUNNER_TEMP/image.tar" --output reports/image-policy.json
       - name: Upload Trivy SARIF
         uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         continue-on-error: true

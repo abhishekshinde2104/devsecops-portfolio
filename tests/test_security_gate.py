@@ -41,14 +41,24 @@ def test_dirty_reports_fail_with_one_blocker_per_class():
     assert ("semgrep", "fastapi-security.jwt-decode-without-algorithms") in blocking
     assert ("gitleaks", "generic-api-key") in blocking
     assert ("trivy-config", "AVD-DS-0002") in blocking
+    assert ("image-policy", "IMG-001") in blocking
     assert any(rule == "CVE-2025-3333" for _, rule in blocking)
 
 
 def test_same_cve_from_multiple_scanners_blocks_once():
+    # trivy reports the CVE id, grype the GHSA id (with CVE alias) and a
+    # different package-name case, dependency-check a purl: all one finding.
     result = gate.evaluate(POLICY, FIXTURES / "dirty")
     same = [f for f in result.findings if f.rule_id == "CVE-2025-3333" and f.location == "starlette@0.36.3"]
-    assert len(same) == 2  # trivy + grype
+    assert {f.scanner for f in same} == {"trivy-image", "grype", "dependency-check"}
     assert sum(f.blocking for f in same) == 1
+
+
+def test_grype_ghsa_is_mapped_to_cve_alias():
+    [finding] = gate.parse_grype(json.loads((FIXTURES / "dirty" / "grype.json").read_text()))
+    assert finding.rule_id == "CVE-2025-3333"
+    assert finding.title.startswith("[GHSA-aaaa-bbbb-cccc]")
+    assert finding.location == "starlette@0.36.3"
 
 
 def test_missing_report_fails_closed(tmp_path):

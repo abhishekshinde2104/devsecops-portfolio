@@ -1,0 +1,1 @@
+{"findings": [{"id": "IMG-001", "severity": "HIGH", "title": "Image runs as root (User=<unset>)", "location": "image-config:User"}]}

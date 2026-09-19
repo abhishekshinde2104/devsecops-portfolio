@@ -63,6 +63,12 @@ class Finding:
 # --------------------------------------------------------------------- parsers
 
 
+def _pkg(name: Any, version: Any) -> str:
+    # Package names are case-insensitive in PyPI and differ in case between
+    # scanners (PyJWT vs pyjwt); normalise so findings deduplicate.
+    return f"{str(name).lower()}@{version}"
+
+
 def parse_semgrep(data: dict) -> Iterable[Finding]:
     for r in data.get("results", []):
         extra = r.get("extra", {})
@@ -97,7 +103,7 @@ def parse_trivy(data: dict) -> Iterable[Finding]:
                 rule_id=v.get("VulnerabilityID", "unknown"),
                 severity=normalise_severity(v.get("Severity")),
                 title=(v.get("Title") or v.get("PkgName", ""))[:160],
-                location=f"{v.get('PkgName')}@{v.get('InstalledVersion')}",
+                location=_pkg(v.get("PkgName"), v.get("InstalledVersion")),
                 fixable=fixed is not None,
                 fix_version=fixed,
             )
@@ -127,12 +133,18 @@ def parse_grype(data: dict) -> Iterable[Finding]:
         art = match.get("artifact", {})
         fix = vuln.get("fix", {}) or {}
         versions = fix.get("versions") or []
+        vuln_id = vuln.get("id", "unknown")
+        # Grype reports language packages by GHSA ID while Trivy and
+        # Dependency-Check use the CVE; prefer the CVE alias so the same
+        # vulnerability deduplicates across scanners.
+        aliases = [r.get("id", "") for r in match.get("relatedVulnerabilities", []) or []]
+        cve = next((a for a in aliases if a.startswith("CVE-")), None)
         yield Finding(
             scanner="grype",
-            rule_id=vuln.get("id", "unknown"),
+            rule_id=cve if cve and not vuln_id.startswith("CVE-") else vuln_id,
             severity=normalise_severity(vuln.get("severity")),
-            title=(vuln.get("description") or art.get("name", ""))[:160],
-            location=f"{art.get('name')}@{art.get('version')}",
+            title=(f"[{vuln_id}] " if cve else "") + (vuln.get("description") or art.get("name", ""))[:160],
+            location=_pkg(art.get("name"), art.get("version")),
             fixable=fix.get("state") == "fixed",
             fix_version=versions[0] if versions else None,
         )
@@ -141,6 +153,8 @@ def parse_grype(data: dict) -> Iterable[Finding]:
 def parse_dependency_check(data: dict) -> Iterable[Finding]:
     for dep in data.get("dependencies", []) or []:
         pkg = (dep.get("packages") or [{}])[0].get("id") or dep.get("fileName", "unknown")
+        if pkg.startswith("pkg:"):  # purl, e.g. pkg:pypi/pyjwt@2.3.0 -> pyjwt@2.3.0
+            pkg = pkg.rsplit("/", 1)[-1].lower()
         for v in dep.get("vulnerabilities", []) or []:
             severity = v.get("severity")
             if not severity and v.get("cvssv3"):
@@ -157,12 +171,24 @@ def parse_dependency_check(data: dict) -> Iterable[Finding]:
             )
 
 
+def parse_image_policy(data: dict) -> Iterable[Finding]:
+    for f in data.get("findings", []) or []:
+        yield Finding(
+            scanner="image-policy",
+            rule_id=f.get("id", "unknown"),
+            severity=normalise_severity(f.get("severity")),
+            title=f.get("title", ""),
+            location=f.get("location", "image"),
+        )
+
+
 PARSERS: dict[str, Callable[[Any], Iterable[Finding]]] = {
     "semgrep": parse_semgrep,
     "gitleaks": parse_gitleaks,
     "trivy": parse_trivy,
     "grype": parse_grype,
     "dependency-check": parse_dependency_check,
+    "image-policy": parse_image_policy,
 }
 
 # --------------------------------------------------------------------- policy
@@ -223,7 +249,12 @@ def evaluate(
         path = reports_dir / report["path"]
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            findings.extend(PARSERS[report["parser"]](data))
+            parsed = list(PARSERS[report["parser"]](data))
+            if label := report.get("label"):
+                for f in parsed:
+                    if f.scanner == report["parser"]:
+                        f.scanner = label
+            findings.extend(parsed)
         except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
             if report.get("required", True) and report["parser"] not in allow_missing:
                 missing.append(f"{report['name']} ({path}): {type(exc).__name__}")
