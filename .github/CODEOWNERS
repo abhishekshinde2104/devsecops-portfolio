@@ -3,3 +3,5 @@
 /.gitleaks.toml                             @abhishekshinde2104
 /project1-devsecops-api/security-gate.toml  @abhishekshinde2104
 /project1-devsecops-api/semgrep-rules/      @abhishekshinde2104
+/project2-k8s-hardening/hardening-policy.toml    @abhishekshinde2104
+/project2-k8s-hardening/manifests/.trivyignore.yaml @abhishekshinde2104

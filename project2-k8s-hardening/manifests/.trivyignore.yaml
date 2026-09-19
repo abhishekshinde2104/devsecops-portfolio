@@ -1,0 +1,20 @@
+# Triaged Trivy misconfiguration findings. Every entry needs a reason; the
+# raw (un-suppressed) counts are reported alongside in docs/hardening-report.md.
+misconfigurations:
+  - id: KSV-0039
+    statement: >-
+      "limit range usage": Trivy evaluates each document in isolation and
+      flags every namespaced object. The namespace does have a LimitRange
+      (hardened/resource-limits.yaml); the flag stays even when all manifests
+      are rendered into one file.
+  - id: KSV-0040
+    statement: >-
+      "resource quota usage": same per-document evaluation as KSV-0039; the
+      namespace has a ResourceQuota (hardened/resource-limits.yaml).
+  - id: KSV-0048
+    paths:
+      - "hardened/rbac.yaml"
+    statement: >-
+      The invoice-api-deployer Role exists to roll out the Deployment. It can
+      only patch/update the Deployment named invoice-api and read pods in its
+      own namespace; no create/delete, no Secrets, no exec.

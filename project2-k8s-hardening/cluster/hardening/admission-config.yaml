@@ -1,0 +1,27 @@
+# API server admission configuration (--admission-control-config-file).
+apiVersion: apiserver.config.k8s.io/v1
+kind: AdmissionConfiguration
+plugins:
+  # Cluster-wide Pod Security Standards default: every namespace without its
+  # own labels enforces "baseline" and audits/warns on "restricted". App
+  # namespaces opt up to "restricted"; the only exemptions are system
+  # namespaces whose components legitimately need host access.
+  - name: PodSecurity
+    configuration:
+      apiVersion: pod-security.admission.config.k8s.io/v1
+      kind: PodSecurityConfiguration
+      defaults:
+        enforce: baseline
+        enforce-version: latest
+        audit: restricted
+        audit-version: latest
+        warn: restricted
+        warn-version: latest
+      exemptions:
+        usernames: []
+        runtimeClasses: []
+        namespaces: [kube-system, local-path-storage]
+  # CIS 1.2.9: rate-limit event creation so a noisy/compromised client cannot
+  # flood the API server and etcd.
+  - name: EventRateLimit
+    path: eventratelimit.yaml

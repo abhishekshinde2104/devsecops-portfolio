@@ -2,8 +2,18 @@
   "required_status_checks": {
     "strict": false,
     "checks": [
-      { "context": "P1 / Security gate", "app_id": 15368 },
-      { "context": "P1 / Lint + security regression tests", "app_id": 15368 }
+      {
+        "context": "P1 / Security gate",
+        "app_id": 15368
+      },
+      {
+        "context": "P1 / Lint + security regression tests",
+        "app_id": 15368
+      },
+      {
+        "context": "P2 / Policy gate",
+        "app_id": 15368
+      }
     ]
   },
   "enforce_admins": true,

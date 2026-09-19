@@ -36,6 +36,10 @@ concurrency:
 
 defaults:
   run:
+    # Explicit `bash` = `bash -eo pipefail`. The implicit default is `bash -e`
+    # without pipefail, so `gate | tee` would report tee's exit code and a
+    # failing gate would pass (this happened on PR #2 before this fix).
+    shell: bash
     working-directory: project1-devsecops-api
 
 env:

@@ -1,0 +1,15 @@
+# INSECURE BASELINE: "the app needed to read a ConfigMap, so someone bound
+# cluster-admin to the default ServiceAccount". Any process in any pod using
+# the default ServiceAccount in `default` now owns the cluster.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: default-sa-cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin

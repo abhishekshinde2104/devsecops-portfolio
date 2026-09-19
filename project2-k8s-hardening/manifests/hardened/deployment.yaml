@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: invoice-api
+  namespace: invoice-api
+  labels:
+    app.kubernetes.io/name: invoice-api
+    app.kubernetes.io/instance: invoice-api
+    app.kubernetes.io/part-of: devsecops-portfolio
+  annotations:
+    # False positive: Polaris matches the *name* APP_SECRETS_DIR; its value is
+    # a directory path. The secret itself is a mounted file (see volumes).
+    polaris.fairwinds.com/sensitiveContainerEnvVar-exempt: "true"
+spec:
+  # One replica: the lab uses SQLite on an emptyDir and an in-process rate
+  # limiter. Horizontal scaling needs Postgres + a shared limiter first
+  # (see docs/hardening-report.md, residual risks).
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: invoice-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: invoice-api
+        app.kubernetes.io/instance: invoice-api
+        app.kubernetes.io/part-of: devsecops-portfolio
+    spec:
+      serviceAccountName: invoice-api
+      automountServiceAccountToken: false     # the app never calls the K8s API
+      enableServiceLinks: false               # no service env vars injected
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch   # only chown volumes when ownership is wrong
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: secure-invoice-api:1.0.0
+          imagePullPolicy: IfNotPresent       # image is side-loaded into kind
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: APP_ENV
+              value: prod
+            # The signing key is read from a mounted Secret file, not an env var.
+            - name: APP_SECRETS_DIR
+              value: /run/secrets/app
+            - name: APP_DATABASE_URL
+              value: sqlite:////data/app.db
+          securityContext:
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+              ephemeral-storage: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+              ephemeral-storage: 128Mi
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 20
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+            - name: app-secrets
+              mountPath: /run/secrets/app
+              readOnly: true
+      volumes:
+        - name: data
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+        - name: app-secrets
+          secret:
+            secretName: invoice-api-secrets   # created by scripts/deploy.sh, never committed
+            defaultMode: 0440                 # root:10001 (fsGroup), group-readable only

@@ -1,0 +1,86 @@
+# Zero-trust networking for the namespace: deny everything, then allow the
+# minimum.
+---
+# 1. Default deny, both directions, for every pod in the namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: invoice-api
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# 2. DNS to CoreDNS only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: invoice-api
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+# 3. Who may call the API: namespaces explicitly labelled as clients, plus
+#    the monitoring namespace for /metrics scraping (Project 3). Everything
+#    else in the cluster is denied by policy 1.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-ingress
+  namespace: invoice-api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: invoice-api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              invoice-api.portfolio/client: "true"
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - {protocol: TCP, port: 8000}
+---
+# 4. Outbound HTTPS for the URL-preview feature, to the public internet only.
+#    This is the network-layer half of the SSRF defence (Project 1 SIA-05):
+#    even if the application guard were bypassed, pods cannot reach cluster
+#    IPs, the node/Docker network, RFC1918 ranges, CGNAT or the cloud
+#    metadata endpoint (169.254.169.254).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-egress-public-https
+  namespace: invoice-api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: invoice-api
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+      ports:
+        - {protocol: TCP, port: 443}

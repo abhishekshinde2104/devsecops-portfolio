@@ -1,0 +1,33 @@
+# Audit policy (CIS 1.2.16 / 3.2.1-3.2.2). Rules are evaluated top-down;
+# the first match wins.
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages: [RequestReceived]
+rules:
+  # High-volume, low-value traffic.
+  - level: None
+    users: ["system:kube-proxy"]
+    verbs: [watch]
+  - level: None
+    nonResourceURLs: ["/healthz*", "/livez*", "/readyz*", "/version", "/metrics"]
+  - level: None
+    resources: [{group: "", resources: [events]}]
+  - level: None
+    resources: [{group: coordination.k8s.io, resources: [leases]}]
+  # Never write secret values (or token material) into audit logs: record
+  # who touched them, not what they contain.
+  - level: Metadata
+    resources:
+      - {group: "", resources: [secrets, configmaps, serviceaccounts/token]}
+      - {group: authentication.k8s.io, resources: [tokenreviews]}
+  # Full detail for access-control changes and interactive access to pods.
+  - level: RequestResponse
+    resources:
+      - {group: rbac.authorization.k8s.io, resources: [roles, rolebindings, clusterroles, clusterrolebindings]}
+  - level: Metadata
+    resources: [{group: "", resources: [pods/exec, pods/attach, pods/portforward, pods/proxy]}]
+  # Writes everywhere else: request bodies (who changed what).
+  - level: Request
+    verbs: [create, update, patch, delete, deletecollection]
+  # Reads: metadata only.
+  - level: Metadata

@@ -7,6 +7,7 @@ missing, too short, or a known placeholder value.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from typing import Literal
 
@@ -79,4 +80,9 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()  # type: ignore[call-arg]  # values come from the environment
+    # APP_SECRETS_DIR points at a directory of files named after the settings
+    # (e.g. /run/secrets/app/APP_SECRET_KEY). In Kubernetes the Secret is
+    # mounted there as files instead of env vars (CIS 5.4.1): env vars leak
+    # into /proc/<pid>/environ, crash dumps and `kubectl describe` output.
+    # Environment variables still take precedence when both are set.
+    return Settings(_secrets_dir=os.environ.get("APP_SECRETS_DIR") or None)  # type: ignore[call-arg]

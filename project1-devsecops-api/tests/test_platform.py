@@ -146,3 +146,19 @@ def test_cli_creates_admin_from_env(tmp_path, monkeypatch):
     with Session(create_engine(db_url)) as db:
         users = db.scalars(select(User)).all()
     assert [(u.email, u.role) for u in users] == [("ops@example.com", "admin")]
+
+
+def test_secret_key_can_be_read_from_mounted_secrets_dir(tmp_path, monkeypatch):
+    import secrets as pysecrets
+
+    from app.config import get_settings
+
+    value = pysecrets.token_urlsafe(48)
+    (tmp_path / "APP_SECRET_KEY").write_text(value)
+    monkeypatch.delenv("APP_SECRET_KEY", raising=False)
+    monkeypatch.setenv("APP_SECRETS_DIR", str(tmp_path))
+    get_settings.cache_clear()
+    try:
+        assert get_settings().secret_key.get_secret_value() == value
+    finally:
+        get_settings.cache_clear()

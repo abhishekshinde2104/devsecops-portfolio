@@ -1,0 +1,191 @@
+# Project 2: Kubernetes hardening lab.
+#
+#   static   manifests validate (kubeconform), scripts lint (shellcheck),
+#            report/gate unit tests
+#   e2e      create the CIS-hardened kind cluster, deploy the hardened
+#            manifests, prove every runtime control (scripts/verify.sh) and
+#            run kube-bench, Kubescape, Trivy and Polaris (scripts/scan.sh)
+#   gate     scripts/policy_gate.py enforces hardening-policy.toml
+#
+# Same monorepo pattern as Project 1: a `changes` job scopes the work and
+# the gate always reports, so it can be a required status check.
+
+name: project2-k8s-hardening
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly: scanner rules and CIS mappings change even when the manifests don't.
+    - cron: "41 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    # Explicit `bash` = `bash -eo pipefail`. The implicit default is `bash -e`
+    # without pipefail, so `gate | tee` would report tee's exit code and a
+    # failing gate would pass (this happened on PR #2 before this fix).
+    shell: bash
+    working-directory: project2-k8s-hardening
+
+env:
+  KIND_VERSION: v0.33.0
+  KUBECONFORM_VERSION: v0.8.0
+
+jobs:
+  changes:
+    name: P2 / Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      project2: ${{ steps.diff.outputs.project2 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: diff
+        working-directory: .
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            range="$PR_BASE...HEAD"
+          elif [ "$EVENT" = push ] && git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+            range="$PUSH_BEFORE..HEAD"
+          else
+            echo "project2=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          files=$(git diff --name-only "$range")
+          echo "$files"
+          # Project 2 deploys the Project 1 image, so app changes re-run it too.
+          if grep -qE '^(project2-k8s-hardening/|project1-devsecops-api/(app|Dockerfile|requirements)|\.github/workflows/project2-k8s-hardening\.yml$)' <<< "$files"; then
+            echo "project2=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "project2=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  static:
+    name: P2 / Manifests, scripts and unit tests
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.project2 == 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install kubeconform (checksum-verified)
+        run: |
+          base="https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}"
+          cd "$RUNNER_TEMP"
+          curl -sSfLO "$base/kubeconform-linux-amd64.tar.gz"
+          curl -sSfLO "$base/CHECKSUMS"
+          grep ' kubeconform-linux-amd64.tar.gz$' CHECKSUMS | sha256sum -c -
+          tar -xzf kubeconform-linux-amd64.tar.gz kubeconform
+      - name: Validate manifests against the Kubernetes 1.34 schema
+        run: |
+          for variant in insecure hardened; do
+            kubectl kustomize "manifests/$variant" \
+              | "$RUNNER_TEMP/kubeconform" -strict -summary -kubernetes-version 1.34.0 -
+          done
+          "$RUNNER_TEMP/kubeconform" -strict -summary -kubernetes-version 1.34.0 manifests/tools/
+      - name: shellcheck
+        run: docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 -x -P scripts scripts/*.sh
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Report and policy-gate unit tests
+        run: |
+          python -m pip install --quiet "pytest==9.1.1"
+          python -m pytest -q tests
+
+  e2e:
+    name: P2 / Hardened cluster e2e + scans
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.project2 == 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install kind (checksum-verified)
+        run: |
+          base="https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}"
+          cd "$RUNNER_TEMP"
+          curl -sSfLO "$base/kind-linux-amd64"
+          curl -sSfLO "$base/kind-linux-amd64.sha256sum"
+          sha256sum -c kind-linux-amd64.sha256sum
+          install -m 0755 kind-linux-amd64 /usr/local/bin/kind
+      - name: Create the CIS-hardened cluster
+        run: scripts/cluster-up.sh hardened
+      - name: Deploy the hardened manifests
+        run: scripts/deploy.sh hardened
+      - name: Prove the runtime controls (fails on any insecure check)
+        run: scripts/verify.sh hardened
+      - name: kube-bench, Kubescape, Trivy, Polaris
+        if: always()
+        run: scripts/scan.sh hardened
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl -n invoice-api describe pods || true
+          kubectl -n invoice-api logs deploy/invoice-api --tail=100 || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: p2-reports-hardened
+          path: project2-k8s-hardening/reports/hardened/
+
+  gate:
+    name: P2 / Policy gate
+    runs-on: ubuntu-latest
+    needs: [changes, static, e2e]
+    if: always()
+    env:
+      CHANGES_RESULT: ${{ needs.changes.result }}
+      STATIC_RESULT: ${{ needs.static.result }}
+      E2E_RESULT: ${{ needs.e2e.result }}
+    steps:
+      - name: Change detection must have succeeded
+        if: needs.changes.result != 'success'
+        working-directory: .
+        run: |
+          echo "::error::changes job result: $CHANGES_RESULT"
+          exit 1
+      - name: Project 2 not affected
+        if: needs.changes.outputs.project2 == 'false'
+        working-directory: .
+        run: echo "No Project 2 files changed; nothing to gate." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.project2 == 'true'
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: needs.changes.outputs.project2 == 'true'
+        with:
+          python-version: "3.14"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.changes.outputs.project2 == 'true'
+        with:
+          name: p2-reports-hardened
+          path: project2-k8s-hardening/reports/hardened
+      - name: Evaluate hardening-policy.toml
+        if: needs.changes.outputs.project2 == 'true'
+        run: |
+          python scripts/report.py summarise reports/hardened > /dev/null
+          python scripts/policy_gate.py reports/hardened/summary.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Static checks and e2e must also have passed
+        if: always() && needs.changes.outputs.project2 == 'true' && (needs.static.result != 'success' || needs.e2e.result != 'success')
+        run: |
+          echo "::error::static: $STATIC_RESULT, e2e: $E2E_RESULT"
+          exit 1
