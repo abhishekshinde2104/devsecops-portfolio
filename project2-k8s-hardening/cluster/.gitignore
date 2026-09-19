@@ -1,0 +1,4 @@
+# Generated per cluster by scripts/cluster-up.sh; contains the Secret
+# encryption key and must never be committed.
+.generated/
+kind-hardened.yaml

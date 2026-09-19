@@ -1,0 +1,47 @@
+# ---------------------------------------------------------------------------
+# INSECURE BASELINE: the "before" state of the hardening lab. Every setting
+# here is a common real-world misconfiguration, kept on purpose so the
+# scanners have something to measure. Never deploy this outside a throwaway
+# local cluster. The hardened equivalent is in ../hardened/.
+# ---------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: invoice-api
+  namespace: default                      # workload in the default namespace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: invoice-api
+  template:
+    metadata:
+      labels:
+        app: invoice-api
+    spec:
+      # default ServiceAccount, token auto-mounted, bound to cluster-admin (rbac.yaml)
+      containers:
+        - name: api
+          image: secure-invoice-api:1.0.0
+          ports:
+            - containerPort: 8000
+          env:
+            # secret as a plaintext env var, committed in the manifest
+            - name: APP_SECRET_KEY
+              value: insecure-baseline-demo-value-not-a-real-key
+            - name: APP_DATABASE_URL
+              value: sqlite:////data/app.db
+          securityContext:
+            privileged: true                # full access to the host's devices
+            runAsUser: 0                    # overrides the image's non-root USER
+            allowPrivilegeEscalation: true
+          # no resources: requests/limits -> can starve the node
+          # no probes
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          hostPath:                         # writes straight onto the node
+            path: /var/lib/invoice-api
+            type: DirectoryOrCreate

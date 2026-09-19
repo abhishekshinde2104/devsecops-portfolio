@@ -1,0 +1,33 @@
+# Thresholds the hardened deployment must keep, enforced by
+# scripts/policy_gate.py in CI (job "P2 / Policy gate").
+# Loosening a threshold or adding an allowed failure needs security review
+# (CODEOWNERS); the reason must be recorded next to the entry.
+
+[runtime]
+# scripts/verify.sh: every runtime check must hold on the live cluster.
+require_all_secure = true
+
+[kube_bench]
+max_fail = 0
+# Failures that are accepted with a documented reason (docs/hardening-report.md).
+allowed_failures = [
+  "1.1.12",  # etcd data dir owned by etcd:etcd: kind runs etcd as root, no etcd user exists
+]
+
+[kubescape]
+min_manifest_compliance = 85.0
+min_manifest_nsa = 100.0
+# Live-scan controls that may fail on app resources, each documented.
+allowed_app_failures = [
+  "C-0053",  # deployer ServiceAccount has a namespaced Role by design
+  "C-0209",  # manual-review control: lists every namespace
+  "C-0211",  # wants SELinux labels; kind/WSL nodes have no SELinux
+]
+
+[polaris]
+min_score = 85
+max_danger = 0
+
+[trivy]
+max_high_critical = 0
+max_medium = 1   # KSV-0048 deployer Role, triaged in manifests/.trivyignore.yaml

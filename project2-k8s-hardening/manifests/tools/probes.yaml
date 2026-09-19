@@ -1,0 +1,61 @@
+# Throwaway client pods used by scripts/verify.sh to prove the
+# NetworkPolicies are enforced (not just present). Both pods comply with the
+# "restricted" Pod Security Standard themselves.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: netpol-allowed
+  labels:
+    invoice-api.portfolio/client: "true"
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: netpol-denied
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: probe
+  namespace: netpol-allowed
+spec:
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile: {type: RuntimeDefault}
+  containers:
+    - name: probe
+      image: docker.io/curlimages/curl:8.22.0
+      command: ["sleep", "3600"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: {drop: [ALL]}
+      resources:
+        limits: {cpu: 100m, memory: 32Mi}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: probe
+  namespace: netpol-denied
+spec:
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile: {type: RuntimeDefault}
+  containers:
+    - name: probe
+      image: docker.io/curlimages/curl:8.22.0
+      command: ["sleep", "3600"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: {drop: [ALL]}
+      resources:
+        limits: {cpu: 100m, memory: 32Mi}

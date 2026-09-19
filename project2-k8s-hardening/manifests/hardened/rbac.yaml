@@ -1,0 +1,67 @@
+# Least-privilege identities.
+#
+# default: Kubernetes creates this ServiceAccount in every namespace with
+# token auto-mounting ON, so any pod that forgets serviceAccountName would
+# get an API token. Declaring it here turns that off (CIS 5.1.5; found by the
+# Kubescape live scan, C-0189).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: invoice-api
+automountServiceAccountToken: false
+---
+# invoice-api: the workload identity. The app never talks to the Kubernetes
+# API, so it gets no Role at all and no mounted token.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: invoice-api
+  namespace: invoice-api
+  labels:
+    app.kubernetes.io/name: invoice-api
+automountServiceAccountToken: false
+---
+# invoice-api-deployer: the identity a CD pipeline would use to roll out new
+# versions. It may read workload state and patch only the invoice-api
+# Deployment. It cannot read Secrets, create or delete anything, exec into
+# pods, or act outside this namespace.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: invoice-api-deployer
+  namespace: invoice-api
+  labels:
+    app.kubernetes.io/name: invoice-api
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: invoice-api-deployer
+  namespace: invoice-api
+rules:
+  - apiGroups: [apps]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [invoice-api]
+    verbs: [patch, update]
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: invoice-api-deployer
+  namespace: invoice-api
+subjects:
+  - kind: ServiceAccount
+    name: invoice-api-deployer
+    namespace: invoice-api
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: invoice-api-deployer

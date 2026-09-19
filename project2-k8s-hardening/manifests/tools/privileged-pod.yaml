@@ -1,0 +1,13 @@
+# Must be REJECTED by Pod Security Admission in the app namespace
+# (scripts/verify.sh applies it with -n <ns> --dry-run=server and expects a denial).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: should-be-rejected
+spec:
+  containers:
+    - name: shell
+      image: secure-invoice-api:1.0.0
+      securityContext:
+        privileged: true
+        runAsUser: 0

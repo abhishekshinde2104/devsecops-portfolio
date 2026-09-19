@@ -1,0 +1,17 @@
+# Cluster-internal only. Reach it with `kubectl port-forward` (or an Ingress
+# with TLS in a real deployment); no NodePort, no LoadBalancer.
+apiVersion: v1
+kind: Service
+metadata:
+  name: invoice-api
+  namespace: invoice-api
+  labels:
+    app.kubernetes.io/name: invoice-api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: invoice-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
