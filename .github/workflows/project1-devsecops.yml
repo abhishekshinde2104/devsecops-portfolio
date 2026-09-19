@@ -168,18 +168,24 @@ jobs:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           mkdir -p reports/dependency-check ~/.dependency-check-data
+          # Dependency-Check cannot parse pip-compile lockfiles (hash lines,
+          # comments); give it plain name==version pins instead.
+          python3 scripts/depcheck_input.py extract requirements.txt requirements-dev.txt -o reports/dc-input/requirements.txt
           key_arg=()
           if [ -n "$NVD_API_KEY" ]; then key_arg=(--nvdApiKey "$NVD_API_KEY"); fi
           docker run --rm --user 0:0 \
             -v "$PWD:/src" -v "$HOME/.dependency-check-data:/usr/share/dependency-check/data" \
             "$DEPCHECK_IMAGE" \
             --project secure-invoice-api \
-            --scan /src/requirements.txt --scan /src/requirements-dev.txt \
+            --scan /src/reports/dc-input/requirements.txt \
             --enableExperimental --disableOssIndex \
             --format JSON --format SARIF --format HTML \
             --out /src/reports/dependency-check \
             "${key_arg[@]}"
           sudo chown -R "$(id -u):$(id -g)" reports ~/.dependency-check-data
+          # A scanner that analysed nothing reports nothing: fail unless every pin was resolved.
+          python3 scripts/depcheck_input.py verify reports/dc-input/requirements.txt \
+            reports/dependency-check/dependency-check-report.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

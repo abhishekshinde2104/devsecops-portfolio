@@ -29,7 +29,7 @@ REPO="$(cd .. && (pwd -W 2>/dev/null || pwd))"      # monorepo root
 # Scanner databases live in named Docker volumes: bind-mounting a Windows
 # folder makes the multi-hundred-MB DB downloads very slow.
 mkdir -p reports
-rm -rf reports/*.json reports/*.sarif reports/dependency-check
+rm -rf reports/*.json reports/*.sarif reports/dependency-check reports/dc-input
 
 step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 
@@ -72,15 +72,20 @@ rm -f reports/image.tar
 ALLOW_MISSING=()
 if [[ $WITH_DEPCHECK == 1 ]]; then
   step "OWASP Dependency-Check"
+  # Dependency-Check cannot parse pip-compile lockfiles; give it plain pins.
+  python scripts/depcheck_input.py extract requirements.txt requirements-dev.txt -o reports/dc-input/requirements.txt
   key_arg=()
   # The key is passed through the environment only; it is never echoed.
   [[ -n "${NVD_API_KEY:-}" ]] && key_arg=(-e NVD_API_KEY)
   docker run --rm --user 0:0 "${key_arg[@]}" -v "$ROOT:/src" -v devsecops-depcheck-data:/usr/share/dependency-check/data \
     --entrypoint sh "$DEPCHECK_IMAGE" -c \
     '/usr/share/dependency-check/bin/dependency-check.sh --project secure-invoice-api \
-       --scan /src/requirements.txt --scan /src/requirements-dev.txt \
+       --scan /src/reports/dc-input/requirements.txt \
        --enableExperimental --disableOssIndex --format JSON --format HTML \
        --out /src/reports/dependency-check ${NVD_API_KEY:+--nvdApiKey "$NVD_API_KEY"}'
+  # A scanner that analysed nothing reports nothing: fail unless every pin was resolved.
+  python scripts/depcheck_input.py verify reports/dc-input/requirements.txt \
+    reports/dependency-check/dependency-check-report.json
 else
   ALLOW_MISSING=(--allow-missing dependency-check)
 fi
