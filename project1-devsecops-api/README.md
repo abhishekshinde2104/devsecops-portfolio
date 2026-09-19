@@ -1,5 +1,7 @@
 # Secure Invoice API: FastAPI + DevSecOps pipeline
 
+[![project1-devsecops](https://github.com/abhishekshinde2104/devsecops-portfolio/actions/workflows/project1-devsecops.yml/badge.svg)](https://github.com/abhishekshinde2104/devsecops-portfolio/actions/workflows/project1-devsecops.yml)
+
 A small multi-tenant invoicing API built to be **secure by design against the
 OWASP Top 10 and OWASP API Security Top 10**, plus a GitHub Actions pipeline
 that proves it on every commit: SAST, SCA, container and IaC scanning, SBOM
@@ -148,7 +150,7 @@ Reports land in `reports/`, and the gate's verdict is printed at the end.
    [request here](https://nvd.nist.gov/developers/request-an-api-key)).
 3. **Settings → Branches**: protect `main` and require the **Security gate** and
    **Lint + security regression tests** checks.
-4. Replace `@YOUR_GITHUB_USERNAME` in the root `.github/CODEOWNERS`.
+4. Set your GitHub handle in the root `.github/CODEOWNERS`.
 5. Optional: public repos get SARIF results in **Security → Code scanning**
    for free.
 

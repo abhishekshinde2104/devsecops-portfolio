@@ -1,5 +1,7 @@
 # DevSecOps Portfolio
 
+[![project1-devsecops](https://github.com/abhishekshinde2104/devsecops-portfolio/actions/workflows/project1-devsecops.yml/badge.svg)](https://github.com/abhishekshinde2104/devsecops-portfolio/actions/workflows/project1-devsecops.yml)
+
 Five connected projects that take one service through the whole security
 lifecycle: secure coding and a CI security gate, container and Kubernetes
 hardening, attack-focused monitoring, threat modelling with vulnerability
