@@ -65,14 +65,14 @@ others. Instead:
 
 The repository holds five projects. A trigger-level `paths:` filter looks
 like the obvious way to run this workflow only for Project 1 changes, but a
-filtered-out workflow **never reports a status**. With `Security gate` as a
+filtered-out workflow **never reports a status**. With `P1 / Security gate` as a
 required check, any PR that touches only another project (or a PR whose net
 diff is empty) would wait forever. This was found when the fix commit of the
 demo PR produced no run at all.
 
 Instead, a small `changes` job diffs the PR (or push) and outputs
 `project1=true|false`. Scanner jobs run only when it's `true`; the
-`Security gate` job **always** runs and reports success with a "not affected"
+`P1 / Security gate` job **always** runs and reports success with a "not affected"
 summary when Project 1 is untouched. Scheduled and manual runs always scan
 everything.
 
@@ -92,15 +92,25 @@ everything.
 
 ## Governance: making the gate binding
 
-In the GitHub repository settings, under **Branches → Branch protection
-rule for `main`**:
-- Require a pull request before merging, with 1 approval and CODEOWNERS review.
-- Require status checks: **`Security gate`** and **`Lint + security regression
-  tests`**.
-- Do not allow bypassing the above settings.
+Branch protection on `main`, kept as code in [`.github/branch-protection.json`](../../.github/branch-protection.json) (15368 is the GitHub Actions app ID):
+
+| Setting | Value | Why |
+|---|---|---|
+| Require a pull request | yes, 0 approvals | Nothing reaches `main` without going through the pipeline. Approvals are 0 because this is a single-maintainer repo (GitHub doesn't let you approve your own PR); a team would require 1+ and CODEOWNERS review |
+| Required status checks | `P1 / Security gate`, `P1 / Lint + security regression tests`, both from the GitHub Actions app only | Pinning the source app stops another integration from posting a fake passing check with the same name |
+| Include administrators | yes | "Don't allow bypassing": the repository owner is gated too |
+| Force pushes / deletion of `main` | blocked | History of what was scanned stays intact |
+| Linear history, conversation resolution | required | Readable history; review comments must be addressed |
+
+Check names are prefixed per project (`P1 / …`) because required checks are
+matched by name, and every project in the monorepo has its own gate.
 
 Without branch protection the gate only advises; with it, a red gate blocks
 the merge.
+
+```bash
+gh api -X PUT repos/<owner>/devsecops-portfolio/branches/main/protection --input .github/branch-protection.json
+```
 
 ## Secrets used by the workflow
 

@@ -52,7 +52,7 @@ env:
 jobs:
   # ------------------------------------------------------------------ scope
   changes:
-    name: Detect Project 1 changes
+    name: P1 / Detect changes
     runs-on: ubuntu-latest
     outputs:
       project1: ${{ steps.diff.outputs.project1 }}
@@ -86,7 +86,7 @@ jobs:
 
   # ------------------------------------------------------------------ tests
   test:
-    name: Lint + security regression tests
+    name: P1 / Lint + security regression tests
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.project1 == 'true'
@@ -117,7 +117,7 @@ jobs:
 
   # ------------------------------------------------------------------ secrets
   secrets:
-    name: Secrets scan (Gitleaks, full history)
+    name: P1 / Secrets scan (Gitleaks, full history)
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.project1 == 'true'
@@ -146,7 +146,7 @@ jobs:
 
   # ------------------------------------------------------------------ SAST
   sast:
-    name: SAST (Semgrep)
+    name: P1 / SAST (Semgrep)
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.project1 == 'true'
@@ -184,7 +184,7 @@ jobs:
 
   # ------------------------------------------------------------------ SCA
   dependency-check:
-    name: SCA (OWASP Dependency-Check)
+    name: P1 / SCA (OWASP Dependency-Check)
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.project1 == 'true'
@@ -231,7 +231,7 @@ jobs:
 
   # ------------------------------------------------------------------ image
   image:
-    name: Build image, SBOM, container + IaC + lockfile scans
+    name: P1 / Build image, SBOM, container + IaC + lockfile scans
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.project1 == 'true'
@@ -302,7 +302,7 @@ jobs:
 
   # ------------------------------------------------------------------ gate
   security-gate:
-    name: Security gate
+    name: P1 / Security gate
     runs-on: ubuntu-latest
     needs: [changes, test, secrets, sast, dependency-check, image]
     # Always runs, so the required status check reports on every PR.

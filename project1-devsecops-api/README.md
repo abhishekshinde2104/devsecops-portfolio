@@ -166,8 +166,9 @@ docker compose up --build            # http://127.0.0.1:8000/docs
 1. Push to a new GitHub repository.
 2. **Settings → Secrets → Actions**: add `NVD_API_KEY` (free,
    [request here](https://nvd.nist.gov/developers/request-an-api-key)).
-3. **Settings → Branches**: protect `main` and require the **Security gate** and
-   **Lint + security regression tests** checks.
+3. Protect `main` and require the **P1 / Security gate** and
+   **P1 / Lint + security regression tests** checks (settings in
+   [docs/pipeline.md](docs/pipeline.md#governance-making-the-gate-binding)).
 4. Set your GitHub handle in the root `.github/CODEOWNERS`.
 5. Optional: public repos get SARIF results in **Security → Code scanning**
    for free.
