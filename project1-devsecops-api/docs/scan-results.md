@@ -12,7 +12,7 @@ ones that exposed problems in the pipeline itself. Raw gate outputs are in
 
 | Scanner | Target | Result |
 |---|---|---|
-| Ruff + pytest | source | 111 tests pass, 94.5% coverage, lint clean |
+| Ruff + pytest | source | 115 tests pass, 94.5% coverage, lint clean |
 | Gitleaks 8.30.1 | full git history | 0 leaks |
 | Semgrep 1.177.0 | app + `.github/` (p/python, p/owasp-top-ten, p/jwt, p/github-actions, 8 custom rules) | 0 findings; custom rule tests 8/8 |
 | Trivy config 0.74.0 | Dockerfile, compose | 0 misconfigurations |
@@ -20,7 +20,7 @@ ones that exposed problems in the pipeline itself. Raw gate outputs are in
 | Image policy | runtime config of the built image | 0 findings (non-root, no baked-in secrets, healthcheck present) |
 | Trivy image 0.74.0 | `python:3.14-slim-trixie` + app | 0 critical · 44 high · 49 medium · 57 low; **none has a fix available** |
 | Syft 1.52.0 → Grype 0.119.0 | SBOM of the image (CycloneDX + SPDX) | 0 critical · 48 high · 52 medium · 51 low; all high findings are Debian `wont-fix` / `not-fixed` |
-| OWASP Dependency-Check 13.0.0 | `requirements*.txt` | Runs in CI with the `NVD_API_KEY` secret; the local run is pending the key |
+| OWASP Dependency-Check 13.0.0 | 37 pinned packages (runtime + dev) | 0 vulnerabilities; coverage verified (all 37 pins resolved to versioned purls) |
 
 ### Why unfixed OS CVEs don't block
 
@@ -82,6 +82,21 @@ CVE alias, so 9 raw PyJWT findings count as 3.
    fail the step on an empty SBOM, and locally Syft reads from the Docker
    daemon instead.
 
+### First GitHub Actions run: Dependency-Check was silently blind
+The first CI runs matched the local results, and the Dependency-Check job
+passed with 0 vulnerabilities. Its report told a different story: **487
+"dependencies", none real**. The experimental pip analyzer reads every
+`--hash=` and `# via` line of a pip-compile lockfile as a package, and reads
+`pyjwt==2.3.0 \` as a package *name*, so no version ever matched the NVD. On
+the red demo PR it contributed nothing while Trivy and Grype blocked.
+
+A scanner that analyses nothing reports nothing, and "no findings" looks
+exactly like "secure". Fix: [`scripts/depcheck_input.py`](../scripts/depcheck_input.py)
+feeds Dependency-Check plain `name==version` pins, then **fails the job
+unless every pin appears in the report as a versioned package**. After the
+fix, `main` shows "analysed all 37 pinned packages", and on the red PR
+Dependency-Check independently reports the three PyJWT CVEs.
+
 ### Demo branch `demo/red-pipeline` → FAILED (4 blocking) → PASSED
 [red gate output](scan-results/demo-red-gate.md)
 
@@ -92,7 +107,13 @@ CVE alias, so 9 raw PyJWT findings count as 3.
 | HIGH | CVE-2026-48526 | `pyjwt@2.3.0` | 2.13.0 |
 | HIGH | IMG-001: image runs as root | image config | restore `USER` |
 
-All 111 tests pass on the red commit. The fix commit restores `main`'s
+Scanners agreeing on the PyJWT CVEs: Trivy image, Trivy fs, Grype and
+Dependency-Check. That's 12 raw findings, deduplicated by the gate to 3.
+
+On GitHub Actions: [PR #1](https://github.com/abhishekshinde2104/devsecops-portfolio/pull/1)
+shows the red run on the first commit and the green run after the fix.
+
+All 115 tests pass on the red commit. The fix commit restores `main`'s
 dependency set and Dockerfile, so its scan result is identical to the
 current `main` result above.
 

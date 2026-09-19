@@ -10,7 +10,10 @@
 #   Dependabot keeps them current. Scanner images are pinned to versions.
 # * Least privilege: the workflow token is read-only; only jobs that upload
 #   SARIF get security-events: write.
-# * Monorepo: runs only when Project 1 (or this workflow) changes; every
+# * Monorepo: a `changes` job decides whether Project 1 is affected; if not,
+#   the scanners are skipped but the `Security gate` job still reports
+#   success. (A trigger-level `paths:` filter would never report at all,
+#   which deadlocks PRs when the gate is a required status check.) Every
 #   `run:` step executes inside project1-devsecops-api/.
 
 name: project1-devsecops
@@ -18,15 +21,7 @@ name: project1-devsecops
 on:
   push:
     branches: [main]
-    paths:
-      - "project1-devsecops-api/**"
-      - ".github/workflows/project1-devsecops.yml"
-      - ".gitleaks.toml"
   pull_request:
-    paths:
-      - "project1-devsecops-api/**"
-      - ".github/workflows/project1-devsecops.yml"
-      - ".gitleaks.toml"
   workflow_dispatch:
   schedule:
     # Weekly re-scan of main: new CVEs are published against unchanged code.
@@ -55,10 +50,46 @@ env:
   GITLEAKS_VERSION: "8.30.1"
 
 jobs:
+  # ------------------------------------------------------------------ scope
+  changes:
+    name: Detect Project 1 changes
+    runs-on: ubuntu-latest
+    outputs:
+      project1: ${{ steps.diff.outputs.project1 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: diff
+        working-directory: .
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            range="$PR_BASE...HEAD"
+          elif [ "$EVENT" = push ] && git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+            range="$PUSH_BEFORE..HEAD"
+          else
+            # schedule, workflow_dispatch, first push: always scan everything
+            echo "project1=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          files=$(git diff --name-only "$range")
+          echo "$files"
+          if grep -qE '^(project1-devsecops-api/|\.github/workflows/project1-devsecops\.yml$|\.gitleaks\.toml$)' <<< "$files"; then
+            echo "project1=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "project1=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # ------------------------------------------------------------------ tests
   test:
     name: Lint + security regression tests
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.project1 == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -88,6 +119,8 @@ jobs:
   secrets:
     name: Secrets scan (Gitleaks, full history)
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.project1 == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -115,6 +148,8 @@ jobs:
   sast:
     name: SAST (Semgrep)
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.project1 == 'true'
     permissions:
       contents: read
       security-events: write
@@ -151,6 +186,8 @@ jobs:
   dependency-check:
     name: SCA (OWASP Dependency-Check)
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.project1 == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -196,6 +233,8 @@ jobs:
   image:
     name: Build image, SBOM, container + IaC + lockfile scans
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.project1 == 'true'
     permissions:
       contents: read
       security-events: write
@@ -265,33 +304,49 @@ jobs:
   security-gate:
     name: Security gate
     runs-on: ubuntu-latest
-    needs: [test, secrets, sast, dependency-check, image]
+    needs: [changes, test, secrets, sast, dependency-check, image]
+    # Always runs, so the required status check reports on every PR.
     if: always()
+    env:
+      CHANGES_RESULT: ${{ needs.changes.result }}
+      TEST_RESULT: ${{ needs.test.result }}
     steps:
+      - name: Change detection must have succeeded
+        if: needs.changes.result != 'success'
+        working-directory: .
+        run: |
+          echo "::error::changes job result: $CHANGES_RESULT"
+          exit 1
+      - name: Project 1 not affected
+        if: needs.changes.outputs.project1 == 'false'
+        working-directory: .
+        run: echo "No Project 1 files changed; scanners skipped, nothing to gate." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.project1 == 'true'
         with:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: needs.changes.outputs.project1 == 'true'
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.changes.outputs.project1 == 'true'
         with:
           pattern: reports-*
           merge-multiple: true
           path: project1-devsecops-api/reports
       - name: Evaluate policy (security-gate.toml)
+        if: needs.changes.outputs.project1 == 'true'
         run: |
           python scripts/security_gate.py --policy security-gate.toml --reports reports \
             --summary "$GITHUB_STEP_SUMMARY" --output reports/gate-result.json
       - name: Tests must also have passed
-        if: needs.test.result != 'success'
-        env:
-          TEST_RESULT: ${{ needs.test.result }}
+        if: needs.changes.outputs.project1 == 'true' && needs.test.result != 'success'
         run: |
           echo "::error::Lint/test job result: $TEST_RESULT"
           exit 1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
+        if: always() && needs.changes.outputs.project1 == 'true'
         with:
           name: gate-result
           path: project1-devsecops-api/reports/gate-result.json

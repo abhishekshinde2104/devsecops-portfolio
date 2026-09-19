@@ -22,10 +22,10 @@ flowchart LR
 
 | Job | Tool (pinned) | Scans | Report(s) | Why this tool |
 |---|---|---|---|---|
-| `test` | ruff 0.16, pytest 9 | lint incl. flake8-bandit `S` rules; 111 security regression tests; coverage ≥85% | JUnit, coverage XML | Fastest feedback; regression tests prove the controls, scanners only find patterns |
+| `test` | ruff 0.16, pytest 9 | lint incl. flake8-bandit `S` rules; 115 tests (security regression, gate, image policy, Dependency-Check coverage); coverage ≥85% | JUnit, coverage XML | Fastest feedback; regression tests prove the controls, scanners only find patterns |
 | `secrets` | Gitleaks 8.30.1 (binary, SHA-256 verified) | every commit in history | `gitleaks.json` | A secret deleted in a later commit is still leaked; only history scans find it |
 | `sast` | Semgrep 1.177.0 | Python source | `semgrep.json`, SARIF → Code Scanning | Community rules + project rules that encode *this* codebase's decisions ([semgrep-rules/](../semgrep-rules/)); rules are unit-tested (`semgrep --test`) |
-| `dependency-check` | OWASP Dependency-Check 13.0.0 | `requirements*.txt` (NVD CPE matching) | JSON, SARIF, HTML | The SCA tool most job descriptions name; NVD-based, so it complements GHSA/OSV-based Trivy and Grype |
+| `dependency-check` | OWASP Dependency-Check 13.0.0 | pins extracted from `requirements*.txt` (NVD CPE matching); **coverage-verified**: the job fails unless every pin was analysed | JSON, SARIF, HTML | The SCA tool most job descriptions name; NVD-based, so it complements GHSA/OSV-based Trivy and Grype |
 | `image` | Trivy 0.74.0 | built image (OS + Python packages + secrets in layers); Dockerfile and compose misconfiguration; lockfile | `trivy-image.json`, `trivy-config.json`, `trivy-fs.json`, SARIF | One tool for container CVEs and IaC misconfiguration; reused for K8s manifests in Project 2 |
 | `image` | Syft 1.52.0 + Grype 0.119.0 | SBOM of the exact image that would ship | `sbom.cdx.json` (CycloneDX), `sbom.spdx.json` (SPDX), `grype.json` | SBOMs are a supply-chain deliverable in their own right (EU CRA, US EO 14028); Grype re-scans the SBOM, so a stored SBOM can be re-checked later without rebuilding |
 | `security-gate` | `security_gate.py` (stdlib only) | all of the above | step summary, `gate-result.json` | See below |
@@ -54,8 +54,27 @@ others. Instead:
      exceptions stop applying automatically and are listed in the summary.
 4. **Fail closed**: a required report that is missing or unparsable blocks the
    build. A crashed or skipped scanner can't produce a false green.
-5. The gate is itself tested (`tests/test_security_gate.py`): clean vs dirty
+5. **Scanners must prove they scanned.** An empty SBOM fails the image job,
+   and Dependency-Check must resolve every pinned package. Both gaps were
+   found while building this pipeline: each tool exited 0 with no useful
+   output.
+6. The gate is itself tested (`tests/test_security_gate.py`): clean vs dirty
    fixtures, deduplication, fail-closed behaviour, exception expiry.
+
+## Monorepo scoping without deadlocking required checks
+
+The repository holds five projects. A trigger-level `paths:` filter looks
+like the obvious way to run this workflow only for Project 1 changes, but a
+filtered-out workflow **never reports a status**. With `Security gate` as a
+required check, any PR that touches only another project (or a PR whose net
+diff is empty) would wait forever. This was found when the fix commit of the
+demo PR produced no run at all.
+
+Instead, a small `changes` job diffs the PR (or push) and outputs
+`project1=true|false`. Scanner jobs run only when it's `true`; the
+`Security gate` job **always** runs and reports success with a "not affected"
+summary when Project 1 is untouched. Scheduled and manual runs always scan
+everything.
 
 ## Supply-chain hardening of the pipeline itself
 
