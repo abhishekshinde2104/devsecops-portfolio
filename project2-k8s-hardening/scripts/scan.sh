@@ -28,15 +28,19 @@ kubectl -n security-tools logs job/kube-bench | grep '^{' > "$out/kube-bench.jso
 kubectl delete namespace security-tools --wait=false >/dev/null   # remove the privileged namespace again
 
 step "Kubescape: live namespace '$ns'"
+# Run as the invoking user: the temporary kubeconfig is mode 600 and the
+# report directory belongs to us. The image's default user can read/write
+# neither on Linux (Windows mounts ignore ownership, so this only broke in CI).
+as_me=(--user "$(id -u):$(id -g)" -e HOME=/tmp)
 kc_dir="$(mktemp -d)"
 trap 'rm -rf "$kc_dir"' EXIT   # the internal kubeconfig holds admin credentials
 kind get kubeconfig --internal --name "$name" > "$kc_dir/config"
-docker run --rm --network kind -v "$(abspath "$kc_dir"):/kc:ro" -e KUBECONFIG=/kc/config -v "$OUT_ABS:/out" \
+docker run --rm --network kind "${as_me[@]}" -v "$(abspath "$kc_dir"):/kc:ro" -e KUBECONFIG=/kc/config -v "$OUT_ABS:/out" \
   "$KUBESCAPE_IMAGE" scan framework nsa,mitre,cis-v1.12.0 --include-namespaces "$ns" \
   --format json --output /out/kubescape-cluster.json --keep-local >/dev/null
 
 step "Kubescape: manifests/$variant"
-docker run --rm -v "$MANIFESTS_ABS:/m:ro" -v "$OUT_ABS:/out" \
+docker run --rm "${as_me[@]}" -v "$MANIFESTS_ABS:/m:ro" -v "$OUT_ABS:/out" \
   "$KUBESCAPE_IMAGE" scan framework nsa,mitre,cis-v1.12.0 "/m/$variant" \
   --format json --output /out/kubescape-manifests.json --keep-local >/dev/null
 

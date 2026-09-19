@@ -114,7 +114,17 @@ Each of these is small, and each would have produced a wrong result silently:
    off.
 4. **kind renders kubeadm `v1beta3` for this version**, where `extraArgs` is a
    map; the `v1beta4` list syntax failed `kubeadm init`.
-5. **Scanner false positives** (Polaris flagging a variable *named*
+5. **The CI policy gate failed open.** On the first CI run Kubescape couldn't
+   read its kubeconfig (a mode-600 file owned by the runner user; the image
+   runs as another user, and Windows mounts ignore ownership, so it only
+   broke in CI). The e2e job failed, yet `P2 / Policy gate` was **green**:
+   the gate ran `policy_gate.py | tee`, and GitHub's implicit shell is
+   `bash -e` *without* `pipefail`, so the step took `tee`'s exit code. Fixes:
+   `shell: bash` (which adds `pipefail`) in every workflow, the gate now
+   also requires the e2e job itself to succeed, and Kubescape runs as the
+   invoking user. The unit test for "missing scanner fails closed" existed;
+   the plumbing around it is what failed.
+6. **Scanner false positives** (Polaris flagging a variable *named*
    `APP_SECRETS_DIR`; Trivy's per-document quota checks) were triaged with
    in-place, reasoned exemptions rather than by weakening thresholds.
 

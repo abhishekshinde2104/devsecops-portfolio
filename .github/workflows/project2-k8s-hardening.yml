@@ -30,6 +30,10 @@ concurrency:
 
 defaults:
   run:
+    # Explicit `bash` = `bash -eo pipefail`. The implicit default is `bash -e`
+    # without pipefail, so `gate | tee` would report tee's exit code and a
+    # failing gate would pass (this happened on PR #2 before this fix).
+    shell: bash
     working-directory: project2-k8s-hardening
 
 env:
@@ -150,6 +154,7 @@ jobs:
     env:
       CHANGES_RESULT: ${{ needs.changes.result }}
       STATIC_RESULT: ${{ needs.static.result }}
+      E2E_RESULT: ${{ needs.e2e.result }}
     steps:
       - name: Change detection must have succeeded
         if: needs.changes.result != 'success'
@@ -179,8 +184,8 @@ jobs:
         run: |
           python scripts/report.py summarise reports/hardened > /dev/null
           python scripts/policy_gate.py reports/hardened/summary.json | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Static checks must also have passed
-        if: needs.changes.outputs.project2 == 'true' && needs.static.result != 'success'
+      - name: Static checks and e2e must also have passed
+        if: always() && needs.changes.outputs.project2 == 'true' && (needs.static.result != 'success' || needs.e2e.result != 'success')
         run: |
-          echo "::error::static job result: $STATIC_RESULT"
+          echo "::error::static: $STATIC_RESULT, e2e: $E2E_RESULT"
           exit 1
