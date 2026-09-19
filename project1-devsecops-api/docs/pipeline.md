@@ -1,6 +1,6 @@
 # DevSecOps pipeline
 
-Workflow: [`.github/workflows/devsecops.yml`](../.github/workflows/devsecops.yml)
+Workflow: [`.github/workflows/project1-devsecops.yml`](../../.github/workflows/project1-devsecops.yml)
 · Gate policy: [`security-gate.toml`](../security-gate.toml)
 · Gate engine: [`scripts/security_gate.py`](../scripts/security_gate.py)
 · Local equivalent: [`scripts/scan-local.sh`](../scripts/scan-local.sh)

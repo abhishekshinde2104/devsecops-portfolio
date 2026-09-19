@@ -38,4 +38,4 @@ key, anyone can mint an admin token without an account.
 
 ## Residual risk
 Gitleaks allowlists cover exactly two synthetic-fixture paths, each justified
-in `.gitleaks.toml`.
+in the repo-root `.gitleaks.toml`.

@@ -7,7 +7,7 @@
 #
 # Pin the base image by digest in CI for reproducibility; Dependabot
 # (docker ecosystem) keeps the tag/digest current.
-ARG PYTHON_IMAGE=python:3.13-slim-trixie
+ARG PYTHON_IMAGE=python:3.14-slim-trixie
 
 FROM ${PYTHON_IMAGE} AS deps
 ENV PIP_NO_CACHE_DIR=1 \

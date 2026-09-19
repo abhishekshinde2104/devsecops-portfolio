@@ -20,7 +20,7 @@ build.
 | Secure API | BOLA/IDOR protection, JWT hardening, Argon2id, mass-assignment protection, parameterised queries, SSRF guard with IP pinning, rate limiting, secret handling, security headers | [`app/`](app/) |
 | Security regression tests | 100+ tests that exercise attack patterns against each control | [`tests/`](tests/) |
 | Custom SAST rules | 8 Semgrep rules encoding this codebase's security decisions, unit-tested | [`semgrep-rules/`](semgrep-rules/) |
-| CI pipeline | Gitleaks, Semgrep, OWASP Dependency-Check, Trivy (image/config/fs), Syft SBOM, Grype | [`.github/workflows/devsecops.yml`](.github/workflows/devsecops.yml) |
+| CI pipeline | Gitleaks, Semgrep, OWASP Dependency-Check, Trivy (image/config/fs), Syft SBOM, Grype | [`.github/workflows/project1-devsecops.yml`](../.github/workflows/project1-devsecops.yml) |
 | Severity gate | Normalises every scanner, blocks on HIGH/CRITICAL, fails closed, time-boxed exceptions | [`scripts/security_gate.py`](scripts/security_gate.py), [`security-gate.toml`](security-gate.toml) |
 | Vulnerability reports | One report per weakness class: OWASP, CWE, CVSS, control, verification, residual risk | [`docs/controls/`](docs/controls/) |
 | Scan results | Latest local pipeline run | [`docs/scan-results.md`](docs/scan-results.md) |
@@ -148,7 +148,7 @@ Reports land in `reports/`, and the gate's verdict is printed at the end.
    [request here](https://nvd.nist.gov/developers/request-an-api-key)).
 3. **Settings → Branches**: protect `main` and require the **Security gate** and
    **Lint + security regression tests** checks.
-4. Replace `@YOUR_GITHUB_USERNAME` in `.github/CODEOWNERS`.
+4. Replace `@YOUR_GITHUB_USERNAME` in the root `.github/CODEOWNERS`.
 5. Optional: public repos get SARIF results in **Security → Code scanning**
    for free.
 
@@ -187,7 +187,7 @@ docs/
   controls/          per-weakness security reports
   pipeline.md        pipeline design
   scan-results.md    latest scan results
-.github/             workflow, Dependabot, CODEOWNERS, PR template
+(repo root) .github/  workflow, Dependabot, CODEOWNERS, PR template
 security-gate.toml   gate policy
 ```
 

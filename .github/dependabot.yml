@@ -5,13 +5,13 @@
 version: 2
 updates:
   - package-ecosystem: pip
-    directory: /
+    directory: /project1-devsecops-api
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     groups:
       runtime: { patterns: ["*"] }
   - package-ecosystem: docker
-    directory: /
+    directory: /project1-devsecops-api
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
   - package-ecosystem: github-actions

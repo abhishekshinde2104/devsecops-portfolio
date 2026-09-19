@@ -1,21 +1,32 @@
-# DevSecOps pipeline: test -> (secrets | SAST | SCA | image scan + SBOM) -> severity gate
+# Project 1 DevSecOps pipeline:
+#   test -> (secrets | SAST | SCA | image scan + SBOM) -> severity gate
 #
-# Design notes (see docs/pipeline.md for the full write-up):
+# Design notes (full write-up: project1-devsecops-api/docs/pipeline.md):
 # * Scanner jobs *produce reports*; they do not decide. The final
 #   `security-gate` job applies security-gate.toml to all reports at once, so
-#   every scanner always runs and the PR summary shows the complete picture.
+#   every scanner always runs and the summary shows the complete picture.
 # * The gate fails closed: a missing report (crashed/skipped scanner) fails it.
 # * Third-party actions are pinned to full commit SHAs (tag in the comment);
 #   Dependabot keeps them current. Scanner images are pinned to versions.
 # * Least privilege: the workflow token is read-only; only jobs that upload
 #   SARIF get security-events: write.
+# * Monorepo: runs only when Project 1 (or this workflow) changes; every
+#   `run:` step executes inside project1-devsecops-api/.
 
-name: devsecops
+name: project1-devsecops
 
 on:
   push:
     branches: [main]
+    paths:
+      - "project1-devsecops-api/**"
+      - ".github/workflows/project1-devsecops.yml"
+      - ".gitleaks.toml"
   pull_request:
+    paths:
+      - "project1-devsecops-api/**"
+      - ".github/workflows/project1-devsecops.yml"
+      - ".gitleaks.toml"
   workflow_dispatch:
   schedule:
     # Weekly re-scan of main: new CVEs are published against unchanged code.
@@ -28,9 +39,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    working-directory: project1-devsecops-api
+
 env:
+  P1: project1-devsecops-api
   IMAGE: secure-invoice-api:${{ github.sha }}
-  PYTHON_VERSION: "3.13"
+  PYTHON_VERSION: "3.14"
   TRIVY_IMAGE: aquasec/trivy:0.74.0
   SEMGREP_IMAGE: semgrep/semgrep:1.177.0
   SYFT_IMAGE: anchore/syft:v1.52.0
@@ -51,7 +67,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-          cache-dependency-path: requirements*.txt
+          cache-dependency-path: project1-devsecops-api/requirements*.txt
       - name: Install (hash-verified)
         run: pip install --require-hashes -r requirements.txt -r requirements-dev.txt
       - name: Ruff (lint incl. flake8-bandit rules + format)
@@ -65,8 +81,8 @@ jobs:
         with:
           name: test-results
           path: |
-            reports/junit.xml
-            coverage.xml
+            project1-devsecops-api/reports/junit.xml
+            project1-devsecops-api/coverage.xml
 
   # ------------------------------------------------------------------ secrets
   secrets:
@@ -85,15 +101,15 @@ jobs:
           curl -sSfLO "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
           sha256sum --check --ignore-missing "gitleaks_${GITLEAKS_VERSION}_checksums.txt"
           tar -xzf "$tarball" gitleaks
-      - name: Scan git history
+      - name: Scan the whole repository history
         run: |
           mkdir -p reports
-          ./gitleaks git . --config .gitleaks.toml --redact \
+          ./gitleaks git .. --config ../.gitleaks.toml --redact \
             --report-format json --report-path reports/gitleaks.json --exit-code 0
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: reports-gitleaks
-          path: reports/
+          path: project1-devsecops-api/reports/
 
   # ------------------------------------------------------------------ SAST
   sast:
@@ -109,22 +125,27 @@ jobs:
       - name: Unit-test the custom rules
         run: docker run --rm -v "$PWD:/src" -w /src "$SEMGREP_IMAGE" semgrep --test --metrics=off semgrep-rules/
       - name: Scan (community rulesets + custom rules)
+        # Runs from the repo root so SARIF paths match the repository layout
+        # (code-scanning annotations land on the right files). The shared
+        # .github/ directory is scanned too (GitHub Actions / Dependabot rules).
+        working-directory: .
         run: |
-          mkdir -p reports
+          mkdir -p "$P1/reports"
           docker run --rm -v "$PWD:/src" -w /src "$SEMGREP_IMAGE" semgrep scan \
-            --config p/python --config p/owasp-top-ten --config p/jwt \
-            --config semgrep-rules/fastapi-security.yml \
-            --metrics=off --json-output=reports/semgrep.json --sarif-output=reports/semgrep.sarif
+            --config p/python --config p/owasp-top-ten --config p/jwt --config p/github-actions \
+            --config "$P1/semgrep-rules/fastapi-security.yml" \
+            --metrics=off --json-output="$P1/reports/semgrep.json" --sarif-output="$P1/reports/semgrep.sarif" \
+            "$P1" .github
       - name: Upload SARIF to GitHub code scanning
         uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         continue-on-error: true # needs GitHub Advanced Security on private repos
         with:
-          sarif_file: reports/semgrep.sarif
-          category: semgrep
+          sarif_file: project1-devsecops-api/reports/semgrep.sarif
+          category: project1-semgrep
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: reports-semgrep
-          path: reports/
+          path: project1-devsecops-api/reports/
 
   # ------------------------------------------------------------------ SCA
   dependency-check:
@@ -142,7 +163,7 @@ jobs:
           restore-keys: depcheck-${{ runner.os }}-
       - name: Scan dependencies
         env:
-          # Free key: https://nvd.nist.gov/developers/request-an-api-key
+          # Repo secret. Free key: https://nvd.nist.gov/developers/request-an-api-key
           # Without it the first NVD download is heavily rate-limited.
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
@@ -163,7 +184,7 @@ jobs:
         if: always()
         with:
           name: reports-dependency-check
-          path: reports/
+          path: project1-devsecops-api/reports/
 
   # ------------------------------------------------------------------ image
   image:
@@ -180,12 +201,12 @@ jobs:
       - name: Build runtime image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: .
+          context: project1-devsecops-api
           target: runtime
           tags: ${{ env.IMAGE }}
           outputs: type=docker,dest=${{ runner.temp }}/image.tar
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=project1
+          cache-to: type=gha,mode=max,scope=project1
       - name: Cache Trivy DB
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -199,7 +220,7 @@ jobs:
           trivy image --input /in/image.tar --scanners vuln,secret --format json --output reports/trivy-image.json
           trivy image --input /in/image.tar --scanners vuln --skip-db-update \
             --severity HIGH,CRITICAL --ignore-unfixed --format sarif --output reports/trivy-image.sarif
-          # Misconfiguration scan of Dockerfile/compose (and k8s manifests in Project 2)
+          # Misconfiguration scan of the Dockerfile and compose file
           trivy config --format json --output reports/trivy-config.json .
           # Lockfile SCA on the source tree (catches dev dependencies too)
           trivy fs --scanners vuln --skip-db-update --format json --output reports/trivy-fs.json .
@@ -211,26 +232,28 @@ jobs:
         uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         continue-on-error: true
         with:
-          sarif_file: reports/trivy-image.sarif
-          category: trivy-image
+          sarif_file: project1-devsecops-api/reports/trivy-image.sarif
+          category: project1-trivy-image
       - name: Syft - generate SBOM (CycloneDX + SPDX)
         run: |
           docker run --rm -v "$PWD/reports:/out" -v "$RUNNER_TEMP:/in:ro" "$SYFT_IMAGE" \
             docker-archive:/in/image.tar \
             -o cyclonedx-json=/out/sbom.cdx.json -o spdx-json=/out/sbom.spdx.json
+          # Syft can exit 0 with an empty file; an empty SBOM must fail the job.
+          test -s reports/sbom.cdx.json && test -s reports/sbom.spdx.json
       - name: Grype - scan the SBOM
         run: |
           docker run --rm -v "$PWD/reports:/work" "$GRYPE_IMAGE" sbom:/work/sbom.cdx.json -o json > reports/grype.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: reports-image
-          path: reports/
+          path: project1-devsecops-api/reports/
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom
           path: |
-            reports/sbom.cdx.json
-            reports/sbom.spdx.json
+            project1-devsecops-api/reports/sbom.cdx.json
+            project1-devsecops-api/reports/sbom.spdx.json
 
   # ------------------------------------------------------------------ gate
   security-gate:
@@ -249,7 +272,7 @@ jobs:
         with:
           pattern: reports-*
           merge-multiple: true
-          path: reports
+          path: project1-devsecops-api/reports
       - name: Evaluate policy (security-gate.toml)
         run: |
           python scripts/security_gate.py --policy security-gate.toml --reports reports \
@@ -265,4 +288,4 @@ jobs:
         if: always()
         with:
           name: gate-result
-          path: reports/gate-result.json
+          path: project1-devsecops-api/reports/gate-result.json

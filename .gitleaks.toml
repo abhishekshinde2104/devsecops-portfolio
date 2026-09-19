@@ -1,15 +1,15 @@
 # Gitleaks configuration: default ruleset plus narrowly scoped allowlists.
 # Every allowlist entry needs a justification; never allowlist broad paths
 # like tests/ wholesale.
-title = "secure-invoice-api gitleaks config"
+title = "devsecops-portfolio gitleaks config"
 
 [extend]
 useDefault = true
 
 [[allowlists]]
 description = "Synthetic scanner-report fixtures for the security gate tests (values are the literal string REDACTED)"
-paths = ['''^tests/fixtures/gate/''']
+paths = ['''^project1-devsecops-api/tests/fixtures/gate/''']
 
 [[allowlists]]
 description = "Semgrep rule unit tests: intentionally matching snippets using the literal value 'placeholder'"
-paths = ['''^semgrep-rules/fastapi-security\.py$''']
+paths = ['''^project1-devsecops-api/semgrep-rules/fastapi-security\.py$''']

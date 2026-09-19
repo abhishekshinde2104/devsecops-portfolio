@@ -1,6 +1,6 @@
-# Paths excluded from the repository SAST scan.
-# .semgrep/ holds rule test cases (intentionally matching snippets); tests/
-# contain attack payloads as data; neither ships in the image.
+# Paths excluded from Project 1's SAST scan (patterns are relative to this
+# folder). semgrep-rules/ holds rule test cases (intentionally matching
+# snippets); tests/ contain attack payloads as data; neither ships in the image.
 semgrep-rules/
 tests/
 docs/

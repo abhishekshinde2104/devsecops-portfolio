@@ -1,0 +1,6 @@
+# Changes to pipelines, gate policies or scanner configuration need security review.
+# Replace @YOUR_GITHUB_USERNAME with your GitHub handle after pushing.
+/.github/                                   @YOUR_GITHUB_USERNAME
+/.gitleaks.toml                             @YOUR_GITHUB_USERNAME
+/project1-devsecops-api/security-gate.toml  @YOUR_GITHUB_USERNAME
+/project1-devsecops-api/semgrep-rules/      @YOUR_GITHUB_USERNAME
