@@ -195,7 +195,7 @@ jobs:
       - name: Trivy - image (OS + Python packages + embedded secrets)
         run: |
           mkdir -p reports ~/.cache/trivy
-          trivy() { docker run --rm -v "$PWD:/src" -v "${{ runner.temp }}:/in:ro" -v "$HOME/.cache/trivy:/root/.cache/trivy" -w /src "$TRIVY_IMAGE" "$@"; }
+          trivy() { docker run --rm -v "$PWD:/src" -v "$RUNNER_TEMP:/in:ro" -v "$HOME/.cache/trivy:/root/.cache/trivy" -w /src "$TRIVY_IMAGE" "$@"; }
           trivy image --input /in/image.tar --scanners vuln,secret --format json --output reports/trivy-image.json
           trivy image --input /in/image.tar --scanners vuln --skip-db-update \
             --severity HIGH,CRITICAL --ignore-unfixed --format sarif --output reports/trivy-image.sarif
@@ -211,7 +211,7 @@ jobs:
           category: trivy-image
       - name: Syft - generate SBOM (CycloneDX + SPDX)
         run: |
-          docker run --rm -v "$PWD/reports:/out" -v "${{ runner.temp }}:/in:ro" "$SYFT_IMAGE" \
+          docker run --rm -v "$PWD/reports:/out" -v "$RUNNER_TEMP:/in:ro" "$SYFT_IMAGE" \
             docker-archive:/in/image.tar \
             -o cyclonedx-json=/out/sbom.cdx.json -o spdx-json=/out/sbom.spdx.json
       - name: Grype - scan the SBOM
@@ -252,8 +252,10 @@ jobs:
             --summary "$GITHUB_STEP_SUMMARY" --output reports/gate-result.json
       - name: Tests must also have passed
         if: needs.test.result != 'success'
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
         run: |
-          echo "::error::Lint/test job result: ${{ needs.test.result }}"
+          echo "::error::Lint/test job result: $TEST_RESULT"
           exit 1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()

@@ -1,15 +1,20 @@
 # Keep dependencies, the base image and pinned action SHAs current. Each
-# update PR runs through the full pipeline and the security gate.
+# update PR runs through the full pipeline and the security gate. The 7-day
+# cooldown avoids adopting a release in its first days, when compromised
+# packages are typically discovered and yanked.
 version: 2
 updates:
   - package-ecosystem: pip
     directory: /
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
     groups:
       runtime: { patterns: ["*"] }
   - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 }

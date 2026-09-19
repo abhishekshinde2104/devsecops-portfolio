@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from app import cli
 from app.config import get_settings
-from app.db import build_engine, build_session_factory
+from app.db import Base, build_engine, build_session_factory
 from app.models import User
 
 
@@ -24,7 +24,9 @@ def cli_env(tmp_path, monkeypatch):
 
 
 def _role(db_url: str, email: str) -> str | None:
-    with build_session_factory(build_engine(db_url))() as db:
+    engine = build_engine(db_url)
+    Base.metadata.create_all(engine)
+    with build_session_factory(engine)() as db:
         user = db.scalar(select(User).where(User.email == email))
         return user.role if user else None
 

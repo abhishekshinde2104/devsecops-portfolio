@@ -138,6 +138,10 @@ def fetch_preview(url: str, settings: Settings, resolver: Resolver | None = None
             cert_reqs="CERT_REQUIRED",
         )
     else:
+        # Plain HTTP is only reachable when an operator sets
+        # APP_OUTBOUND_ALLOW_HTTP=true (default: false), and the target has
+        # already passed the same IP validation. Triaged in docs/scan-results.md.
+        # nosemgrep: python.lang.security.audit.network.http-not-https-connection.http-not-https-connection
         pool = urllib3.HTTPConnectionPool(**pool_kwargs)
 
     default_port = _DEFAULT_PORTS[target.scheme]

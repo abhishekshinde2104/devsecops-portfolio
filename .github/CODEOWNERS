@@ -1,6 +1,7 @@
 # Changes to the pipeline, gate policy or scanner config need security review.
-/.github/               @abhishekshinde2104
-/security-gate.toml     @abhishekshinde2104
-/.gitleaks.toml         @abhishekshinde2104
-/.semgrepignore         @abhishekshinde2104
-/semgrep-rules/         @abhishekshinde2104
+# Replace @YOUR_GITHUB_USERNAME with your GitHub handle after pushing.
+/.github/               @YOUR_GITHUB_USERNAME
+/security-gate.toml     @YOUR_GITHUB_USERNAME
+/.gitleaks.toml         @YOUR_GITHUB_USERNAME
+/.semgrepignore         @YOUR_GITHUB_USERNAME
+/semgrep-rules/         @YOUR_GITHUB_USERNAME

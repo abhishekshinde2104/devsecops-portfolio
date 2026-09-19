@@ -21,9 +21,12 @@ RUN python -m venv /opt/venv \
 FROM deps AS test
 COPY requirements-dev.txt .
 RUN /opt/venv/bin/pip install --require-hashes --only-binary=:all: -r requirements-dev.txt
+RUN useradd --system --uid 10002 --create-home tester && install -d -o tester -g tester /src
 WORKDIR /src
-COPY . .
+COPY --chown=tester . .
 ENV PATH=/opt/venv/bin:$PATH
+# Tests run unprivileged too; nothing in the build needs root after install.
+USER tester
 CMD ["pytest", "-q"]
 
 FROM deps AS venv-prod
