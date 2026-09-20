@@ -1,0 +1,150 @@
+# Security detections for the Secure Invoice API.
+#
+# These alert on *attacks*, not uptime: the framing is what makes this a
+# security project rather than an SRE dashboard. Every rule maps to a Project 1
+# control (SIA-xx) and a MITRE ATT&CK technique, and fires on the security
+# counters the app exports (app/metrics.py):
+#   auth_events_total{event,reason}          login_failure, token_rejected, ...
+#   authz_denied_total{resource,reason}      invoice/not_owner (BOLA), admin
+#   rate_limit_rejections_total{scope}       login, global, outbound, ...
+#   outbound_request_blocked_total{reason}   SSRF guard blocks
+#   http_requests_total{method,route,status}
+# plus kube-state-metrics for restarts and `up` for availability.
+#
+# Recording rules pre-compute the noisy rate/increase expressions once so the
+# alerts and the Grafana dashboard share one definition. Thresholds are
+# deliberately low because the lab generates little traffic; docs/runbook.md
+# explains how to tune them.
+
+groups:
+  - name: invoice-api.recording
+    interval: 15s
+    rules:
+      - record: invoice_api:http_requests:rate5m
+        expr: sum(rate(http_requests_total{namespace="invoice-api"}[5m]))
+      - record: invoice_api:http_requests_by_route:rate5m
+        expr: sum by (route, method, status) (rate(http_requests_total{namespace="invoice-api"}[5m]))
+      - record: invoice_api:http_5xx:rate5m
+        expr: sum(rate(http_requests_total{namespace="invoice-api", status=~"5.."}[5m]))
+      - record: invoice_api:http_5xx:ratio5m
+        expr: |
+          sum(rate(http_requests_total{namespace="invoice-api", status=~"5.."}[5m]))
+            / clamp_min(sum(rate(http_requests_total{namespace="invoice-api"}[5m])), 1e-9)
+      - record: invoice_api:login_failures:increase5m
+        expr: sum(increase(auth_events_total{namespace="invoice-api", event="login_failure"}[5m]))
+      - record: invoice_api:login_throttled:increase5m
+        expr: sum(increase(rate_limit_rejections_total{namespace="invoice-api", scope=~"login.*"}[5m]))
+      - record: invoice_api:token_rejected:increase5m
+        expr: sum(increase(auth_events_total{namespace="invoice-api", event="token_rejected"}[5m]))
+      - record: invoice_api:bola_denied:increase5m
+        expr: sum(increase(authz_denied_total{namespace="invoice-api", resource="invoice"}[5m]))
+      - record: invoice_api:admin_denied:increase5m
+        expr: sum(increase(authz_denied_total{namespace="invoice-api", resource="admin"}[5m]))
+      - record: invoice_api:ssrf_blocked:increase5m
+        expr: sum(increase(outbound_request_blocked_total{namespace="invoice-api"}[5m]))
+
+  - name: invoice-api.security
+    rules:
+      # --- Authentication attacks -------------------------------------------
+      - alert: InvoiceApiBruteForceLogin
+        expr: invoice_api:login_failures:increase5m > 20
+        for: 2m
+        labels: {severity: warning, team: security, control: SIA-06, attack: brute-force}
+        annotations:
+          summary: "Login brute force against the Invoice API"
+          description: "{{ $value | humanize }} failed logins in 5m (namespace invoice-api). Threshold 20."
+          mitre: "T1110 Brute Force"
+          runbook: "https://github.com/abhishekshinde2104/devsecops-portfolio/blob/main/project3-security-monitoring/docs/runbook.md#bruteforce"
+
+      - alert: InvoiceApiCredentialStuffingThrottled
+        expr: invoice_api:login_throttled:increase5m > 30
+        for: 2m
+        labels: {severity: warning, team: security, control: SIA-06, attack: brute-force}
+        annotations:
+          summary: "Sustained rate-limited login attempts (credential stuffing)"
+          description: "{{ $value | humanize }} login requests rejected by the rate limiter in 5m."
+          mitre: "T1110.004 Credential Stuffing"
+
+      - alert: InvoiceApiTokenTampering
+        expr: invoice_api:token_rejected:increase5m > 10
+        for: 2m
+        labels: {severity: warning, team: security, control: SIA-02, attack: auth-bypass}
+        annotations:
+          summary: "Repeated rejected JWTs (forgery / tampering attempts)"
+          description: "{{ $value | humanize }} tokens rejected in 5m: expired, wrong signature, or forged claims."
+          mitre: "T1550.001 Application Access Token"
+
+      # --- Authorization attacks --------------------------------------------
+      - alert: InvoiceApiBOLAProbing
+        expr: invoice_api:bola_denied:increase5m > 10
+        for: 2m
+        labels: {severity: critical, team: security, control: SIA-01, attack: bola}
+        annotations:
+          summary: "Object-level authorization probing (BOLA/IDOR)"
+          description: "{{ $value | humanize }} cross-tenant invoice access attempts in 5m (owner check denied)."
+          mitre: "T1078 Valid Accounts / API1:2023"
+
+      - alert: InvoiceApiPrivilegeEscalationAttempts
+        expr: invoice_api:admin_denied:increase5m > 5
+        for: 2m
+        labels: {severity: critical, team: security, control: SIA-08, attack: privilege-escalation}
+        annotations:
+          summary: "Non-admin users hitting admin endpoints"
+          description: "{{ $value | humanize }} admin authorization denials in 5m."
+          mitre: "T1068 Exploitation for Privilege Escalation"
+
+      # --- SSRF --------------------------------------------------------------
+      - alert: InvoiceApiSSRFAttempts
+        expr: invoice_api:ssrf_blocked:increase5m > 5
+        for: 2m
+        labels: {severity: critical, team: security, control: SIA-05, attack: ssrf}
+        annotations:
+          summary: "Outbound requests blocked by the SSRF guard"
+          description: "{{ $value | humanize }} URL-preview requests blocked in 5m (private IPs, metadata, bad scheme)."
+          mitre: "T1090 Proxy / A10:2021"
+
+      # --- Volumetric / recon ------------------------------------------------
+      - alert: InvoiceApiReconScanning
+        expr: sum(increase(http_requests_total{namespace="invoice-api", status="404"}[5m])) > 50
+        for: 2m
+        labels: {severity: warning, team: security, attack: recon}
+        annotations:
+          summary: "Elevated 404s (endpoint enumeration / scanning)"
+          description: "{{ $value | humanize }} 404 responses in 5m."
+          mitre: "T1595 Active Scanning"
+
+      - alert: InvoiceApiAbnormalRequestRate
+        expr: invoice_api:http_requests:rate5m > 50
+        for: 5m
+        labels: {severity: warning, team: security, attack: dos}
+        annotations:
+          summary: "Abnormal request rate to the Invoice API"
+          description: "{{ $value | humanize }} req/s over 5m (baseline is near-zero in the lab)."
+          mitre: "T1498 Network Denial of Service"
+
+      # --- Reliability signals with a security reading -----------------------
+      - alert: InvoiceApiHigh5xxRate
+        expr: invoice_api:http_5xx:ratio5m > 0.05
+        for: 5m
+        labels: {severity: warning, team: security}
+        annotations:
+          summary: "Elevated 5xx rate on the Invoice API"
+          description: "{{ $value | humanizePercentage }} of requests are 5xx over 5m (possible exploitation or abuse)."
+
+      - alert: InvoiceApiContainerRestarting
+        # round(): increase() extrapolates to a fraction; a restart count should read as an integer.
+        expr: round(increase(kube_pod_container_status_restarts_total{namespace="invoice-api", container="api"}[15m])) > 2
+        for: 0m
+        labels: {severity: warning, team: security}
+        annotations:
+          summary: "Invoice API container is restarting"
+          description: "Pod {{ $labels.pod }} restarted {{ $value | humanize }} times in 15m (crash, OOM, or tampering)."
+          mitre: "T1499 Endpoint Denial of Service"
+
+      - alert: InvoiceApiDown
+        expr: up{namespace="invoice-api", job="invoice-api"} == 0 or absent(up{namespace="invoice-api", job="invoice-api"})
+        for: 2m
+        labels: {severity: critical, team: security}
+        annotations:
+          summary: "Invoice API target is down or unscraped"
+          description: "Prometheus cannot scrape the Invoice API (metrics endpoint unreachable or NetworkPolicy misconfigured)."

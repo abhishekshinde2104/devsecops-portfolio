@@ -1,0 +1,214 @@
+# promtool unit tests for the security detections.
+#   promtool test rules rules/tests/security-alerts.test.yaml
+# Each case drives synthetic series through the real recording + alerting
+# rules and asserts which alerts fire. This is the detection logic's test
+# suite: it runs in CI with no cluster (P3 / Static job).
+
+rule_files:
+  - ../security-alerts.rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # --- brute force -------------------------------------------------------
+  - name: brute force login fires above threshold
+    interval: 1m
+    input_series:
+      - series: 'auth_events_total{namespace="invoice-api", event="login_failure", reason="bad_credentials"}'
+        # 0..40 over 8 minutes => increase over 5m = 25 > 20
+        values: "0 5 10 15 20 25 30 35 40"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: InvoiceApiBruteForceLogin
+        exp_alerts:
+          - exp_labels: {severity: warning, team: security, control: SIA-06, attack: brute-force}
+            exp_annotations:
+              summary: "Login brute force against the Invoice API"
+              description: "25 failed logins in 5m (namespace invoice-api). Threshold 20."
+              mitre: "T1110 Brute Force"
+              runbook: "https://github.com/abhishekshinde2104/devsecops-portfolio/blob/main/project3-security-monitoring/docs/runbook.md#bruteforce"
+
+  - name: a few failed logins do not fire
+    interval: 1m
+    input_series:
+      - series: 'auth_events_total{namespace="invoice-api", event="login_failure", reason="bad_credentials"}'
+        values: "0 1 2 3 4 5 6 7 8"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: InvoiceApiBruteForceLogin
+        exp_alerts: []
+
+  # --- BOLA -------------------------------------------------------------
+  - name: BOLA probing fires (critical)
+    interval: 1m
+    input_series:
+      - series: 'authz_denied_total{namespace="invoice-api", resource="invoice", reason="not_owner"}'
+        values: "0 3 6 9 12 15 18 21 24"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: InvoiceApiBOLAProbing
+        exp_alerts:
+          - exp_labels: {severity: critical, team: security, control: SIA-01, attack: bola}
+            exp_annotations:
+              summary: "Object-level authorization probing (BOLA/IDOR)"
+              description: "15 cross-tenant invoice access attempts in 5m (owner check denied)."
+              mitre: "T1078 Valid Accounts / API1:2023"
+
+  # --- privilege escalation --------------------------------------------
+  - name: privilege escalation attempts fire
+    interval: 1m
+    input_series:
+      - series: 'authz_denied_total{namespace="invoice-api", resource="admin", reason="missing_role"}'
+        values: "0 2 4 6 8 10 12 14 16"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: InvoiceApiPrivilegeEscalationAttempts
+        exp_alerts:
+          - exp_labels: {severity: critical, team: security, control: SIA-08, attack: privilege-escalation}
+            exp_annotations:
+              summary: "Non-admin users hitting admin endpoints"
+              description: "10 admin authorization denials in 5m."
+              mitre: "T1068 Exploitation for Privilege Escalation"
+
+  # --- SSRF -------------------------------------------------------------
+  - name: SSRF attempts fire
+    interval: 1m
+    input_series:
+      - series: 'outbound_request_blocked_total{namespace="invoice-api", reason="non_public_address"}'
+        values: "0 2 4 6 8 10 12 14 16"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: InvoiceApiSSRFAttempts
+        exp_alerts:
+          - exp_labels: {severity: critical, team: security, control: SIA-05, attack: ssrf}
+            exp_annotations:
+              summary: "Outbound requests blocked by the SSRF guard"
+              description: "10 URL-preview requests blocked in 5m (private IPs, metadata, bad scheme)."
+              mitre: "T1090 Proxy / A10:2021"
+
+  # --- token tampering --------------------------------------------------
+  - name: token tampering fires
+    interval: 1m
+    input_series:
+      - series: 'auth_events_total{namespace="invoice-api", event="token_rejected", reason="invalid"}'
+        values: "0 3 6 9 12 15 18 21 24"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: InvoiceApiTokenTampering
+        exp_alerts:
+          - exp_labels: {severity: warning, team: security, control: SIA-02, attack: auth-bypass}
+            exp_annotations:
+              summary: "Repeated rejected JWTs (forgery / tampering attempts)"
+              description: "15 tokens rejected in 5m: expired, wrong signature, or forged claims."
+              mitre: "T1550.001 Application Access Token"
+
+  # --- recon (404 scanning) --------------------------------------------
+  - name: recon scanning fires on 404 flood
+    interval: 1m
+    input_series:
+      # step 12 (linear) => increase over 5m = 60, clear of the >50 threshold.
+      - series: 'http_requests_total{namespace="invoice-api", method="GET", route="/invoices/{invoice_id}", status="404"}'
+        values: "0 12 24 36 48 60 72 84 96"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: InvoiceApiReconScanning
+        exp_alerts:
+          - exp_labels: {severity: warning, team: security, attack: recon}
+            exp_annotations:
+              summary: "Elevated 404s (endpoint enumeration / scanning)"
+              description: "60 404 responses in 5m."
+              mitre: "T1595 Active Scanning"
+
+  # --- 5xx ratio --------------------------------------------------------
+  - name: high 5xx ratio fires
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{namespace="invoice-api", method="GET", route="/invoices", status="200"}'
+        values: "0+90x10"
+      - series: 'http_requests_total{namespace="invoice-api", method="GET", route="/invoices", status="500"}'
+        values: "0+10x10"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: InvoiceApiHigh5xxRate
+        exp_alerts:
+          - exp_labels: {severity: warning, team: security}
+            exp_annotations:
+              summary: "Elevated 5xx rate on the Invoice API"
+              description: "10% of requests are 5xx over 5m (possible exploitation or abuse)."
+
+  # --- container restarting --------------------------------------------
+  # round() makes the extrapolated increase() a whole number; the alert also
+  # carries the series' own pod/container/namespace labels.
+  - name: container restarts fire
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="invoice-api", container="api", pod="invoice-api-abc"}'
+        values: "0 0 1 1 2 3 4"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: InvoiceApiContainerRestarting
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: security
+              namespace: invoice-api
+              container: api
+              pod: invoice-api-abc
+            exp_annotations:
+              summary: "Invoice API container is restarting"
+              description: "Pod invoice-api-abc restarted 4 times in 15m (crash, OOM, or tampering)."
+              mitre: "T1499 Endpoint Denial of Service"
+
+  # --- API down ---------------------------------------------------------
+  - name: API down fires when up==0
+    interval: 1m
+    input_series:
+      - series: 'up{namespace="invoice-api", job="invoice-api", pod="invoice-api-abc"}'
+        values: "0 0 0 0"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: InvoiceApiDown
+        exp_alerts:
+          - exp_labels: {severity: critical, team: security, job: invoice-api, namespace: invoice-api, pod: invoice-api-abc}
+            exp_annotations:
+              summary: "Invoice API target is down or unscraped"
+              description: "Prometheus cannot scrape the Invoice API (metrics endpoint unreachable or NetworkPolicy misconfigured)."
+
+  - name: API down fires when target is absent
+    interval: 1m
+    input_series:
+      - series: 'up{namespace="other", job="something-else"}'
+        values: "1 1 1 1"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: InvoiceApiDown
+        exp_alerts:
+          # absent() carries the equality-matched labels from the selector.
+          - exp_labels: {severity: critical, team: security, namespace: invoice-api, job: invoice-api}
+            exp_annotations:
+              summary: "Invoice API target is down or unscraped"
+              description: "Prometheus cannot scrape the Invoice API (metrics endpoint unreachable or NetworkPolicy misconfigured)."
+
+  # --- healthy steady state fires nothing -------------------------------
+  - name: normal low traffic raises no security alert
+    interval: 1m
+    input_series:
+      - series: 'up{namespace="invoice-api", job="invoice-api", pod="invoice-api-abc"}'
+        values: "1 1 1 1 1 1 1 1 1 1"
+      - series: 'http_requests_total{namespace="invoice-api", method="POST", route="/auth/login", status="200"}'
+        values: "0+1x10"
+      - series: 'auth_events_total{namespace="invoice-api", event="login_failure", reason="bad_credentials"}'
+        values: "0 1 1 1 2 2 2 3 3 3"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: InvoiceApiBruteForceLogin
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: InvoiceApiBOLAProbing
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: InvoiceApiAbnormalRequestRate
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: InvoiceApiDown
+        exp_alerts: []

@@ -5,3 +5,4 @@
 /project1-devsecops-api/semgrep-rules/      @abhishekshinde2104
 /project2-k8s-hardening/hardening-policy.toml    @abhishekshinde2104
 /project2-k8s-hardening/manifests/.trivyignore.yaml @abhishekshinde2104
+/project3-security-monitoring/rules/                @abhishekshinde2104

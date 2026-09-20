@@ -1,0 +1,177 @@
+# Project 3: security monitoring stack.
+#
+#   static   promtool check + unit-test the detection rules, shellcheck,
+#            dashboard JSON, python unit tests (no cluster)
+#   e2e      hardened kind cluster (Project 2) + app (Project 1) + the
+#            monitoring stack, then verify-pipeline.sh proves scrape ->
+#            metrics -> rules -> dashboard -> Alertmanager -> sink end to end
+#   gate     scripts/pipeline_gate.py: every pipeline check must have passed
+#
+# Same monorepo pattern: a `changes` job scopes the work; the gate always
+# reports so it can be a required status check.
+
+name: project3-security-monitoring
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "53 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    # Explicit bash = bash -eo pipefail (the implicit default omits pipefail).
+    shell: bash
+    working-directory: project3-security-monitoring
+
+env:
+  PROMETHEUS_IMAGE: prom/prometheus:v3.14.0
+
+jobs:
+  changes:
+    name: P3 / Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      project3: ${{ steps.diff.outputs.project3 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: diff
+        working-directory: .
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            range="$PR_BASE...HEAD"
+          elif [ "$EVENT" = push ] && git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+            range="$PUSH_BEFORE..HEAD"
+          else
+            echo "project3=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          files=$(git diff --name-only "$range")
+          echo "$files"
+          # P3 deploys the P1 image and reuses the P2 cluster scripts.
+          if grep -qE '^(project3-security-monitoring/|project1-devsecops-api/(app|Dockerfile|requirements)|project2-k8s-hardening/(scripts|manifests|cluster)/|\.github/workflows/project3-security-monitoring\.yml$)' <<< "$files"; then
+            echo "project3=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "project3=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  static:
+    name: P3 / Rules, scripts and unit tests
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.project3 == 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: promtool check + unit-test the detection rules
+        run: |
+          docker run --rm -v "$PWD/rules:/rules:ro" --entrypoint promtool "$PROMETHEUS_IMAGE" \
+            check rules /rules/security-alerts.rules.yaml
+          docker run --rm -v "$PWD/rules:/rules:ro" --entrypoint promtool "$PROMETHEUS_IMAGE" \
+            test rules /rules/tests/security-alerts.test.yaml
+      - name: Validate the Grafana dashboard JSON
+        run: python -c "import json,sys; d=json.load(open('dashboards/invoice-api-security.json')); assert d['panels'], 'no panels'; print(len(d['panels']),'panels')"
+      - name: shellcheck
+        run: docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 -x -P scripts scripts/*.sh
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Python unit tests + compile
+        run: |
+          python -m pip install --quiet "pytest==9.1.1"
+          python -m py_compile scripts/verify_pipeline.py scripts/pipeline_gate.py
+          python -m pytest -q tests
+
+  e2e:
+    name: P3 / Live pipeline e2e
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.project3 == 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install kind (checksum-verified)
+        working-directory: .
+        run: |
+          base="https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0"
+          cd "$RUNNER_TEMP"
+          curl -sSfLO "$base/kind-linux-amd64"
+          curl -sSfLO "$base/kind-linux-amd64.sha256sum"
+          sha256sum -c kind-linux-amd64.sha256sum
+          install -m 0755 kind-linux-amd64 /usr/local/bin/kind
+      - name: Hardened cluster (Project 2) + app (Project 1)
+        working-directory: .
+        run: |
+          project2-k8s-hardening/scripts/cluster-up.sh hardened
+          project2-k8s-hardening/scripts/deploy.sh hardened
+      - name: Install the monitoring stack
+        run: scripts/monitoring-up.sh
+      - name: Verify the pipeline end to end
+        run: scripts/verify-pipeline.sh
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl --context kind-p2-hardened get pods -A || true
+          kubectl --context kind-p2-hardened -n monitoring get prometheusrule,servicemonitor || true
+          kubectl --context kind-p2-hardened -n monitoring logs -l app.kubernetes.io/name=alert-sink --tail=50 || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: p3-pipeline-checks
+          path: project3-security-monitoring/reports/
+
+  gate:
+    name: P3 / Pipeline gate
+    runs-on: ubuntu-latest
+    needs: [changes, static, e2e]
+    if: always()
+    env:
+      CHANGES_RESULT: ${{ needs.changes.result }}
+      STATIC_RESULT: ${{ needs.static.result }}
+      E2E_RESULT: ${{ needs.e2e.result }}
+    steps:
+      - name: Change detection must have succeeded
+        if: needs.changes.result != 'success'
+        working-directory: .
+        run: |
+          echo "::error::changes job result: $CHANGES_RESULT"
+          exit 1
+      - name: Project 3 not affected
+        if: needs.changes.outputs.project3 == 'false'
+        working-directory: .
+        run: echo "No Project 3 files changed; nothing to gate." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.project3 == 'true'
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.changes.outputs.project3 == 'true'
+        with:
+          name: p3-pipeline-checks
+          path: project3-security-monitoring/reports
+      - name: Evaluate the pipeline checks (fail closed)
+        if: needs.changes.outputs.project3 == 'true'
+        run: |
+          python scripts/pipeline_gate.py reports/pipeline-checks.tsv | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Static and e2e must also have passed
+        if: always() && needs.changes.outputs.project3 == 'true' && (needs.static.result != 'success' || needs.e2e.result != 'success')
+        run: |
+          echo "::error::static: $STATIC_RESULT, e2e: $E2E_RESULT"
+          exit 1

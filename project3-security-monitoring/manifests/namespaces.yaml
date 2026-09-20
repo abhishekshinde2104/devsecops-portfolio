@@ -1,0 +1,25 @@
+# monitoring: Prometheus, Alertmanager, Grafana, operator, kube-state-metrics
+# and the alert sink. Enforces the "baseline" Pod Security Standard (the
+# chart's components run non-root, but some need `baseline`-level settings)
+# and audits/warns on "restricted".
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: v1.34
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+# falco: runtime threat detection needs kernel-level visibility (eBPF), i.e.
+# a privileged pod. This is the only privileged namespace in the steady
+# state, isolated so the exemption is explicit and reviewable.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: falco
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged

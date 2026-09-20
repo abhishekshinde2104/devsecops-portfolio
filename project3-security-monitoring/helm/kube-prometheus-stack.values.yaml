@@ -1,0 +1,154 @@
+# kube-prometheus-stack values, tuned for a single-node kind cluster on a
+# memory-constrained laptop (~5 GB for the Docker VM). Requests are small;
+# retention is short. Not a production sizing (see docs/README residual notes).
+
+fullnameOverride: kps
+
+# --- Alerting: route security alerts to the webhook sink -------------------
+alertmanager:
+  alertmanagerSpec:
+    replicas: 1
+    retention: 24h
+    resources:
+      requests: {cpu: 10m, memory: 48Mi}
+      limits: {cpu: 200m, memory: 128Mi}
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+      fsGroup: 65534
+      seccompProfile: {type: RuntimeDefault}
+    # Label the Alertmanager pod so the alert-sink NetworkPolicy can admit it.
+    podMetadata:
+      labels:
+        app.kubernetes.io/name: alertmanager
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources: {requests: {storage: 1Gi}}
+  config:
+    global:
+      resolve_timeout: 2m
+    route:
+      receiver: "null"
+      group_by: [alertname, namespace]
+      group_wait: 15s
+      group_interval: 1m
+      repeat_interval: 1h
+      routes:
+        # Everything the detections emit carries team=security.
+        - matchers: [team = security]
+          receiver: security-webhook
+          continue: false
+    receivers:
+      - name: "null"
+      - name: security-webhook
+        webhook_configs:
+          - url: http://alert-sink.monitoring.svc.cluster.local:8080/alerts
+            send_resolved: true
+    inhibit_rules:
+      # A down target shouldn't also spam abnormal-rate/5xx noise.
+      - source_matchers: [alertname = InvoiceApiDown]
+        target_matchers: [team = security]
+        equal: [namespace]
+
+# --- Grafana ---------------------------------------------------------------
+grafana:
+  replicas: 1
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  resources:
+    requests: {cpu: 50m, memory: 160Mi}
+    # Grafana 12's unified apiserver needs headroom: it was OOMKilled (137) at
+    # 256Mi mid-boot. 512Mi is stable here.
+    limits: {cpu: "1", memory: 512Mi}
+  # Grafana's boot registers many API groups and is slow under CPU pressure on
+  # a laptop cluster. A generous startupProbe holds the liveness probe off so
+  # it isn't killed mid-boot (seen locally: SIGTERM at ~2.5m before ready).
+  startupProbe:
+    httpGet: {path: /api/health, port: 3000}
+    periodSeconds: 10
+    failureThreshold: 60
+  livenessProbe:
+    httpGet: {path: /api/health, port: 3000}
+    periodSeconds: 15
+    failureThreshold: 6
+  # Pick up dashboards from ConfigMaps labelled grafana_dashboard=1.
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: monitoring
+      folder: /tmp/dashboards
+      provider:
+        allowUiUpdates: false
+  grafana.ini:
+    security:
+      cookie_secure: true
+      content_security_policy: true
+    analytics:
+      reporting_enabled: false
+      check_for_updates: false
+    users:
+      allow_sign_up: false
+  serviceAccount:
+    autoMount: false
+
+# --- Prometheus ------------------------------------------------------------
+prometheus:
+  prometheusSpec:
+    replicas: 1
+    retention: 6h
+    retentionSize: 1GB
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+    resources:
+      requests: {cpu: 50m, memory: 200Mi}
+      limits: {cpu: "1", memory: 512Mi}
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+      fsGroup: 65534
+      seccompProfile: {type: RuntimeDefault}
+    # Discover ServiceMonitors/PrometheusRules across namespaces (the app's
+    # ServiceMonitor lives in the invoice-api namespace), not only those the
+    # chart labels itself.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources: {requests: {storage: 3Gi}}
+
+# --- Trim components the lab doesn't need ----------------------------------
+# The control-plane in kind is a single container: the per-component scrape
+# targets (etcd, scheduler, controller-manager, kube-proxy) aren't separately
+# reachable, so their always-firing "watchdog" style alerts are just noise.
+kubeEtcd: {enabled: false}
+kubeScheduler: {enabled: false}
+kubeControllerManager: {enabled: false}
+kubeProxy: {enabled: false}
+
+kube-state-metrics:
+  resources:
+    requests: {cpu: 10m, memory: 48Mi}
+    limits: {cpu: 100m, memory: 128Mi}
+
+# node-exporter needs hostNetwork/hostPID/hostPath, which the "baseline" Pod
+# Security Standard on the monitoring namespace forbids. Node-level host
+# metrics aren't part of the security-detection story (those run on app
+# metrics + kube-state-metrics), so it's disabled to keep the namespace
+# non-privileged. See docs/README residual notes.
+nodeExporter:
+  enabled: false
+
+prometheusOperator:
+  resources:
+    requests: {cpu: 10m, memory: 64Mi}
+    limits: {cpu: 200m, memory: 192Mi}
