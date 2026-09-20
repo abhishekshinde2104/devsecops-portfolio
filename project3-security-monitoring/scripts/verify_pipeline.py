@@ -8,7 +8,7 @@ promtool unit tests (rules/tests/); this proves the wiring end to end:
   C02  normal usage (register, log in, create + list an invoice) shows up in
        the app's security metrics in Prometheus
   C03  every security alert rule is loaded and healthy (no evaluation errors)
-  C04  the recording rules the detections depend on return data
+  C04  the recording rules the detections depend on are loaded and healthy
   C05  every Grafana dashboard panel query executes against Prometheus
   C06  Grafana is healthy and serves the provisioned security dashboard
   C07  a synthetic, clearly labelled alert is routed by Alertmanager to the
@@ -122,12 +122,14 @@ def c02_app_metrics(c, prom, api):
     # A wrong login too, so the login_failure counter is non-zero.
     http("POST", f"{api}/auth/login", {"email": email, "password": "wrong"})
 
+    # Instant counter value, not increase(): the metric may have only just
+    # appeared, and increase() over a window with one sample yields nothing.
     def seen():
         ok, res, _ = prom_query(
-            prom, 'sum(increase(auth_events_total{namespace="invoice-api", event="login_success"}[5m]))')
+            prom, 'sum(auth_events_total{namespace="invoice-api", event="login_success"})')
         return ok and res and scalar(res) >= 1
-    c.record("C02", "Normal usage appears in security metrics", wait_until(seen, 90),
-             "auth_events_total login_success increased")
+    c.record("C02", "Normal usage appears in security metrics", wait_until(seen, 120),
+             "auth_events_total login_success >= 1")
 
 
 def c03_rules_loaded(c, prom):
@@ -148,14 +150,22 @@ def c03_rules_loaded(c, prom):
 
 
 def c04_recording_rules(c, prom):
-    bad = []
-    for expr in RECORDING_RULES:
-        ok, res, err = prom_query(prom, expr)
-        if not ok or not res:
-            bad.append(f"{expr}({err or 'no data'})")
-    c.record("C04", "Recording rules return data", not bad,
-             f"{len(RECORDING_RULES) - len(bad)}/{len(RECORDING_RULES)} return data"
-             + (f"; {bad}" if bad else ""))
+    # Assert the recording rules are loaded and evaluating without error, not
+    # that they return data: rules that sum over a security event (throttled
+    # logins, 5xx) correctly return nothing until such an event happens.
+    _, body = http("GET", f"{prom}/api/v1/rules?type=record")
+    loaded, unhealthy = {}, []
+    for grp in ((body or {}).get("data", {}) or {}).get("groups", []):
+        for rule in grp.get("rules", []):
+            if rule.get("type") == "recording":
+                loaded[rule["name"]] = rule.get("health")
+                if rule.get("health") not in (None, "ok"):
+                    unhealthy.append(f"{rule['name']}:{rule.get('health')}")
+    missing = [r for r in RECORDING_RULES if r not in loaded]
+    c.record("C04", "Recording rules loaded and healthy", not missing and not unhealthy,
+             f"{len(RECORDING_RULES) - len(missing)}/{len(RECORDING_RULES)} loaded"
+             + (f", missing {missing}" if missing else "")
+             + (f", unhealthy {unhealthy}" if unhealthy else ""))
 
 
 def _dashboard_exprs():
