@@ -1,0 +1,17 @@
+# Scrape the Secure Invoice API's /metrics (security counters from Project 1).
+# The Project 2 NetworkPolicy already admits the monitoring namespace on 8000.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: invoice-api
+  namespace: invoice-api
+  labels:
+    app.kubernetes.io/name: invoice-api
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: invoice-api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

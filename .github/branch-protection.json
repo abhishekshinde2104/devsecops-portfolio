@@ -13,6 +13,10 @@
       {
         "context": "P2 / Policy gate",
         "app_id": 15368
+      },
+      {
+        "context": "P3 / Pipeline gate",
+        "app_id": 15368
       }
     ]
   },
