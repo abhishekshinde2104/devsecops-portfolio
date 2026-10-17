@@ -111,7 +111,7 @@ jobs:
           ruff format --check .
       - name: Pytest (coverage gate 85%)
         run: pytest --cov --cov-report=term --cov-report=xml --junitxml=reports/junit.xml
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: test-results
@@ -143,7 +143,7 @@ jobs:
           mkdir -p reports
           ./gitleaks git .. --config ../.gitleaks.toml --redact \
             --report-format json --report-path reports/gitleaks.json --exit-code 0
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: reports-gitleaks
           path: project1-devsecops-api/reports/
@@ -181,7 +181,7 @@ jobs:
         with:
           sarif_file: project1-devsecops-api/reports/semgrep.sarif
           category: project1-semgrep
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: reports-semgrep
           path: project1-devsecops-api/reports/
@@ -227,7 +227,7 @@ jobs:
           # A scanner that analysed nothing reports nothing: fail unless every pin was resolved.
           python3 scripts/depcheck_input.py verify reports/dc-input/requirements.txt \
             reports/dependency-check/dependency-check-report.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: reports-dependency-check
@@ -293,11 +293,11 @@ jobs:
       - name: Grype - scan the SBOM
         run: |
           docker run --rm -v "$PWD/reports:/work" "$GRYPE_IMAGE" sbom:/work/sbom.cdx.json -o json > reports/grype.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: reports-image
           path: project1-devsecops-api/reports/
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom
           path: |
@@ -349,7 +349,7 @@ jobs:
         run: |
           echo "::error::Lint/test job result: $TEST_RESULT"
           exit 1
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && needs.changes.outputs.project1 == 'true'
         with:
           name: gate-result
