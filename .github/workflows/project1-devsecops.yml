@@ -176,7 +176,7 @@ jobs:
             --metrics=off --json-output="$P1/reports/semgrep.json" --sarif-output="$P1/reports/semgrep.sarif" \
             "$P1" .github
       - name: Upload SARIF to GitHub code scanning
-        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         continue-on-error: true # needs GitHub Advanced Security on private repos
         with:
           sarif_file: project1-devsecops-api/reports/semgrep.sarif
@@ -278,7 +278,7 @@ jobs:
         # this checks the config of the image that will actually run.
         run: python3 scripts/image_policy.py --image-tar "$RUNNER_TEMP/image.tar" --output reports/image-policy.json
       - name: Upload Trivy SARIF
-        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         continue-on-error: true
         with:
           sarif_file: project1-devsecops-api/reports/trivy-image.sarif
